@@ -2,7 +2,7 @@ import mujoco
 import numpy as np
 from mujoco import viewer
 import time
-from kinematics import backward_kinematics
+# from kinematics import backward_kinematics
 
 # Load the MuJoCo model from an XML file
 xml = "project1_quadruped/third_party/mujoco_menagerie/unitree_a1/scene.xml"
@@ -56,15 +56,15 @@ ctrl_lift_fl[rr_knee] = ctrl_des[rr_knee] + d_knee # 抬高 knee
 t0 = time.perf_counter()
 T = 1.0  # 每 1 秒切換一次
 
-# with viewer.launch_passive(model, data) as v:
-#     while v.is_running():
-#         t = time.perf_counter() - t0
-#         if int(t / T) % 2 == 0:
-#             data.ctrl[:] = ctrl_lift_fl  # 偶數秒：站
-#         else:
-#             data.ctrl[:] = ctrl_lift_fr   # 奇數秒：抬
-#         mujoco.mj_step(model, data)
-#         v.sync()
+with viewer.launch_passive(model, data) as v:
+    while v.is_running():
+        t = time.perf_counter() - t0
+        if int(t / T) % 2 == 0:
+            data.ctrl[:] = ctrl_lift_fl  # 偶數秒：站
+        else:
+            data.ctrl[:] = ctrl_lift_fr   # 奇數秒：抬
+        mujoco.mj_step(model, data)
+        v.sync()
 
 
 

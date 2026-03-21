@@ -55,3 +55,22 @@ def backward_kinematics_2d(x, z, hu, hl):
     hip_angle = np.arctan2(x, -z) - np.arctan2(hl * np.sin(knee_angle), hu + hl * np.cos(knee_angle))
 
     return hip_angle, knee_angle
+
+
+def forward_kinematics_2d(hip_angle, knee_angle, hu, hl):
+    """
+    計算四足機器人腿部末端位置（2D版本）。
+    
+    Parameters:
+    hip_angle: 髖關節角度 (rad)
+    knee_angle: 膝關節角度 (rad)
+    hu: 大腿長度
+    hl: 小腿長度
+    
+    Returns:
+    x: 末端位置的x座標
+    z: 末端位置的z座標
+    """
+    x = hu * np.sin(hip_angle) + hl * np.sin(hip_angle + knee_angle)
+    z = -hu * np.cos(hip_angle) - hl * np.cos(hip_angle + knee_angle)
+    return x, z
