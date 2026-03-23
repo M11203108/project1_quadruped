@@ -22,7 +22,7 @@ def backward_kinematics_3d(x, y, z, h, hu, hl):
 
     # 計算膝關節角度
     S = np.sqrt(np.square(x) + np.square(z))
-    N = (np.square(S) - np.square(hl) - np.square(hu)) / (2 * np.square(hu) * np.square(hl))
+    N = (np.square(S) - np.square(hl) - np.square(hu)) / (2 * hu * hl)
     N = np.clip(N, -1.0, 1.0)  # 確保 n 在 [-1, 1] 範圍
     knee_angle = -np.arccos(N)
 

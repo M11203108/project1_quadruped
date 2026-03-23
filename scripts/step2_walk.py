@@ -2,7 +2,26 @@ import mujoco
 import numpy as np
 from mujoco import viewer
 import time
-from kinematics import backward_kinematics_2d
+from kinematics import backward_kinematics_2d, forward_kinematics_2d
+
+x_home, z_home = 0.0, -0.24864398730826576
+hip_angle, knee_angle = 0.9, -1.8
+hu, hl = 0.2, 0.2
+step_length, lift_height = 0.08, 0.035
+left_step_length = 0.09
+right_step_length = 0.05
+
+T = 0.450  # 每 1 秒切換一次
+# print(backward_kinematics_2d(x_home, z_home, hu, hl))
+# print(np.rad2deg(backward_kinematics_2d(x_home, z_home, hu, hl)))
+
+x, z = forward_kinematics_2d(hip_angle, knee_angle, hu, hl)
+print("FK:", x, z)
+
+hip2, knee2 = backward_kinematics_2d(x, z, hu, hl)
+print("IK:", hip2, knee2)
+
+print("FK->IK degree:", np.rad2deg([hip2, knee2]))
 
 def get_phase(t, T):
     phase = (t % T) / T # % 取餘數, t=0.2 → t%T = 0.2
@@ -20,8 +39,8 @@ def swing_traj(s, x_home, z_home, step_length, lift_height):
     x: 從後方走到前方
     z: 中間抬高
     """
-    x_start = x_home - step_length / 2
-    x_end = x_home + step_length / 2
+    x_start = x_home + step_length / 2
+    x_end = x_home - step_length / 2
 
     x = x_start + (x_end - x_start) * s
     z =z_home + lift_height * 4 * s * (1 - s)
@@ -35,7 +54,8 @@ def stance_traj(s, x_home, z_home, step_length):
     """
     x_start = x_home + step_length / 2
     x_end = x_home - step_length / 2
-    x = x_start + (x_end - x_start) * s
+    # x = x_start + (x_end - x_start) * s
+    x = x_home
     z = z_home
     return x, z
 
@@ -70,43 +90,35 @@ rr_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_calf")
 rl_hip  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
 rl_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
-x_home, z_home = 0.0, -0.25
-hu, hl = 0.2, 0.2
-step_length, lift_height = 0.05, 0.01
-
-print(backward_kinematics_2d(x_home, z_home, hu, hl))
-print(np.rad2deg(backward_kinematics_2d(x_home, z_home, hu, hl)))
-
-T = 1.0  # 每 1 秒切換一次
 t0 = time.perf_counter() # 記錄起始時間
 
-# with viewer.launch_passive(model, data) as v:
-#     while v.is_running():
-#         t =time.perf_counter() - t0 # 計算經過的時間
-#         phase, active_pair, s = get_phase(t, T)
+with viewer.launch_passive(model, data) as v:
+    while v.is_running():
+        t =time.perf_counter() - t0 # 計算經過的時間
+        phase, active_pair, s = get_phase(t, T)
 
-#         ctrl = ctrl_home.copy()
+        ctrl = ctrl_home.copy()
     
 
-#         if active_pair == "A":
-#             x_fr, z_fr = swing_traj(s, x_home, z_home, step_length, lift_height)
-#             x_rl, z_rl = swing_traj(s, x_home, z_home, step_length, lift_height)
+        if active_pair == "A":
+            x_fr, z_fr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
+            x_rl, z_rl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
 
-#             x_rr, z_rr = stance_traj(s, x_home, z_home, step_length)
-#             x_fl, z_fl = stance_traj(s, x_home, z_home, step_length)
+            x_rr, z_rr = stance_traj(s, x_home, z_home, right_step_length)
+            x_fl, z_fl = stance_traj(s, x_home, z_home, left_step_length)
 
-#         else:
-#             x_fl, z_fl = swing_traj(s, x_home, z_home, step_length, lift_height)
-#             x_rr, z_rr = swing_traj(s, x_home, z_home, step_length, lift_height)
+        else:
+            x_fl, z_fl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
+            x_rr, z_rr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
 
-#             x_fr, z_fr = stance_traj(s, x_home, z_home, step_length)
-#             x_rl, z_rl = stance_traj(s, x_home, z_home, step_length)
+            x_fr, z_fr = stance_traj(s, x_home, z_home, left_step_length)
+            x_rl, z_rl = stance_traj(s, x_home, z_home, right_step_length)
 
-#         set_leg_ctrl(ctrl, fr_hip, fr_knee, x_fr, z_fr, hu, hl, ctrl_range)
-#         set_leg_ctrl(ctrl, fl_hip, fl_knee, x_fl, z_fl, hu, hl, ctrl_range)
-#         set_leg_ctrl(ctrl, rr_hip, rr_knee, x_rr, z_rr, hu, hl, ctrl_range)
-#         set_leg_ctrl(ctrl, rl_hip, rl_knee, x_rl, z_rl, hu, hl, ctrl_range)
+        set_leg_ctrl(ctrl, fr_hip, fr_knee, x_fr, z_fr, hu, hl, ctrl_range)
+        set_leg_ctrl(ctrl, fl_hip, fl_knee, x_fl, z_fl, hu, hl, ctrl_range)
+        set_leg_ctrl(ctrl, rr_hip, rr_knee, x_rr, z_rr, hu, hl, ctrl_range)
+        set_leg_ctrl(ctrl, rl_hip, rl_knee, x_rl, z_rl, hu, hl, ctrl_range)
 
-#         data.ctrl[:] = ctrl
-#         mujoco.mj_step(model, data)
-#         v.sync()
+        data.ctrl[:] = ctrl
+        mujoco.mj_step(model, data)
+        v.sync()
