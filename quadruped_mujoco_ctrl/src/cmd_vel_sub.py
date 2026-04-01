@@ -17,9 +17,9 @@ class CmdVelSubscriber(Node):
         self.get_logger().info('CmdVelSubscriber node has been started.')
 
     def cmd_vel_callback(self, msg):
-        cmd_linear_x = msg.linear.x
-        cmd_angular_z = msg.angular.z
-        self.get_logger().info(f'Received cmd_vel: linear.x={cmd_linear_x}, angular.z={cmd_angular_z}')
+        self.cmd_linear_x = msg.linear.x
+        self.cmd_angular_z = msg.angular.z
+        self.get_logger().info(f'Received cmd_vel: linear.x={self.cmd_linear_x}, angular.z={self.cmd_angular_z}')
 
 def main(args=None):
     rclpy.init(args=args)

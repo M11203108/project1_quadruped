@@ -2,12 +2,14 @@ import mujoco
 import numpy as np
 from mujoco import viewer
 import time
+from pathlib import Path
 # from kinematics import backward_kinematics
 
 # Load the MuJoCo model from an XML file
-xml = "project1_quadruped/third_party/mujoco_menagerie/unitree_a1/scene.xml"
+BASE_DIR = Path(__file__).resolve().parents[2]
+xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
 # A:lod model
-model = mujoco.MjModel.from_xml_path(xml)
+model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
 print("joint數 model.njnt =", model.njnt)
 print("actuator數 model.nu =", model.nu)
