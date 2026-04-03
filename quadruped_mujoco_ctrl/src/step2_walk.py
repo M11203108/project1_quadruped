@@ -2,14 +2,15 @@ import mujoco
 import numpy as np
 from mujoco import viewer
 import time
-from project1_quadruped.ros2_ws.src.kinematics import backward_kinematics_2d, forward_kinematics_2d
+from kinematics import backward_kinematics_2d, forward_kinematics_2d
+from pathlib import Path
 
 x_home, z_home = 0.0, -0.24864398730826576
 hip_angle, knee_angle = 0.9, -1.8
 hu, hl = 0.2, 0.2
 step_length, lift_height = 0.08, 0.035
-left_step_length = 0.09
-right_step_length = 0.05
+left_step_length = 0.6
+right_step_length = -0.6
 
 T = 0.450  # 每 1 秒切換一次
 # print(backward_kinematics_2d(x_home, z_home, hu, hl))
@@ -67,9 +68,10 @@ def set_leg_ctrl(ctrl, hip_id, knee_id, x, z, hu, hl, ctrl_range):
     ctrl[knee_id] = knee_angle
 
 # Load the MuJoCo model from an XML file
-xml = "project1_quadruped/third_party/mujoco_menagerie/unitree_a1/scene.xml"
+BASE_DIR = Path(__file__).resolve().parents[2]
+xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
 # Load model
-model = mujoco.MjModel.from_xml_path(xml)
+model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
 
 key_name = "home"

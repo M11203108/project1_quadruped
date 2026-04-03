@@ -14,7 +14,8 @@ x_home, z_home = 0.0, -0.24864398730826576
 hip_angle, knee_angle = 0.9, -1.8
 hu, hl = 0.2, 0.2
 lift_height = 0.035
-k_v = 1.0
+k_lin = 1.0
+k_yaw = 0.2
 T = 0.50  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
 xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
@@ -72,12 +73,12 @@ def main():
     # print(np.rad2deg(backward_kinematics_2d(x_home, z_home, hu, hl)))
 
     x, z = forward_kinematics_2d(hip_angle, knee_angle, hu, hl)
-    print("FK:", x, z)
+    # print("FK:", x, z)
 
     hip2, knee2 = backward_kinematics_2d(x, z, hu, hl)
-    print("IK:", hip2, knee2)
+    # print("IK:", hip2, knee2)
 
-    print("FK->IK degree:", np.rad2deg([hip2, knee2]))
+    # print("FK->IK degree:", np.rad2deg([hip2, knee2]))
 
     # Load the MuJoCo model from an XML file
 
@@ -113,12 +114,13 @@ def main():
                 mujoco.mj_step(model, data)
                 v.sync()
                 continue
-            foward_step = k_v * cmd_linear_x * T
-            turn_step = k_v * cmd_angular_z * T
-            left_step_length = foward_step - turn_step
-            right_step_length = foward_step + turn_step
+            base_step = k_lin * cmd_linear_x
+            turn_step = k_yaw * cmd_angular_z
+            left_step_length = base_step - turn_step
+            right_step_length = base_step + turn_step
             t =time.perf_counter() - t0 # 計算經過的時間
             phase, active_pair, s = get_phase(t, T)
+            print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length, "phase:", phase, "active_pair:", active_pair, "s:", s)
 
             ctrl = ctrl_home.copy()
         
