@@ -15,7 +15,7 @@ hip_angle, knee_angle = 0.9, -1.8
 hu, hl = 0.2, 0.2
 lift_height = 0.035
 k_lin = 1.0
-k_yaw = 0.2
+k_yaw = 0.25
 T = 0.50  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
 xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
@@ -120,7 +120,7 @@ def main():
             right_step_length = base_step + turn_step
             t =time.perf_counter() - t0 # 計算經過的時間
             phase, active_pair, s = get_phase(t, T)
-            print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length, "phase:", phase, "active_pair:", active_pair, "s:", s)
+            print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length)
 
             ctrl = ctrl_home.copy()
         
