@@ -8,6 +8,7 @@ from mujoco import viewer
 from kinematics import backward_kinematics_2d, forward_kinematics_2d
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
+from sensor_msgs.msg import Imu
 
 
 x_home, z_home = 0.0, -0.24864398730826576
@@ -22,6 +23,7 @@ xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
 # Load model
 model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
+print("nsensor =", model.nsensor)
 
 def get_phase(t, T):
     phase = (t % T) / T # % 取餘數, t=0.2 → t%T = 0.2
@@ -66,11 +68,43 @@ def set_leg_ctrl(ctrl, hip_id, knee_id, x, z, hu, hl, ctrl_range):
     ctrl[hip_id] = hip_angle
     ctrl[knee_id] = knee_angle
 
+def publish_imu(gyro_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim):
+    
+    gyro = np.array(data.sensordata[gyro_adr:gyro_adr + gyro_dim], copy=True)
+    acc  = np.array(data.sensordata[acc_adr:acc_adr + acc_dim], copy=True)
+
+    msg = Imu()
+    msg.header.stamp = gyro_node.get_clock().now().to_msg()
+    msg.header.frame_id = "imu_link"
+
+    msg.orientation_covariance[0] = -1.0
+    msg.angular_velocity.x = float(gyro[0])
+    msg.angular_velocity.y = float(gyro[1])
+    msg.angular_velocity.z = float(gyro[2])
+
+    msg.linear_acceleration.x = float(acc[0])
+    msg.linear_acceleration.y = float(acc[1])
+    msg.linear_acceleration.z = float(acc[2])
+
+    imu_pub.publish(msg)
+
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
     # print(backward_kinematics_2d(x_home, z_home, hu, hl))
     # print(np.rad2deg(backward_kinematics_2d(x_home, z_home, hu, hl)))
+
+    pub_node = rclpy.create_node("imu_publisher")
+    imu_pub = pub_node.create_publisher(Imu, "imu/data", 10)
+
+    gyro_sensor = model.sensor("imu_gyro")
+    acc_sensor  = model.sensor("imu_acc")
+    gyro_adr = int(np.asarray(gyro_sensor.adr).item())
+    gyro_dim = int(np.asarray(gyro_sensor.dim).item())
+
+    acc_adr = int(np.asarray(acc_sensor.adr).item())
+    acc_dim = int(np.asarray(acc_sensor.dim).item())
+
 
     x, z = forward_kinematics_2d(hip_angle, knee_angle, hu, hl)
     # print("FK:", x, z)
@@ -146,8 +180,10 @@ def main():
 
             data.ctrl[:] = ctrl
             mujoco.mj_step(model, data)
+            publish_imu(pub_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
             v.sync()
         cmd_node.destroy_node()
+        pub_node.destroy_node()
         rclpy.shutdown()
 
 if __name__ == "__main__":
