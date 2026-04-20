@@ -3,12 +3,12 @@ import numpy as np
 import time
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped, PoseStamped
 from mujoco import viewer
 from kinematics import backward_kinematics_2d, forward_kinematics_2d
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
-from sensor_msgs.msg import Imu
+from sensor_msgs.msg import Imu, JointState
 
 
 x_home, z_home = 0.0, -0.24864398730826576
@@ -88,14 +88,64 @@ def publish_imu(gyro_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim):
 
     imu_pub.publish(msg)
 
+def publish_joint_states(joint_node, joint_pub, data):
+    msg = JointState()
+    msg.header.stamp = joint_node.get_clock().now().to_msg()
+    msg.name = [
+        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    ]
+    msg.position = data.qpos[7:19].tolist()
+    msg.velocity = data.qvel[6:18].tolist()
+    msg.effort = []
+
+    joint_pub.publish(msg)
+
+def publish_base_pose(pose_pub, pose_node, twist_pub):
+    pose_msg = PoseStamped()
+    pose_msg.header.stamp = pose_node.get_clock().now().to_msg()
+    pose_msg.header.frame_id = "world"
+
+    pose_msg.pose.position.x = float(data.qpos[0])
+    pose_msg.pose.position.y = float(data.qpos[1])
+    pose_msg.pose.position.z = float(data.qpos[2])
+
+    pose_msg.pose.orientation.w = float(data.qpos[3])
+    pose_msg.pose.orientation.x = float(data.qpos[4])
+    pose_msg.pose.orientation.y = float(data.qpos[5])
+    pose_msg.pose.orientation.z = float(data.qpos[6])
+
+    twist_msg = TwistStamped()
+    twist_msg.header.stamp = pose_node.get_clock().now().to_msg()
+    twist_msg.header.frame_id = "world"
+
+    twist_msg.twist.linear.x = float(data.qvel[0])
+    twist_msg.twist.linear.y = float(data.qvel[1])
+    twist_msg.twist.linear.z = float(data.qvel[2])
+
+    twist_msg.twist.angular.x = float(data.qvel[3])
+    twist_msg.twist.angular.y = float(data.qvel[4])
+    twist_msg.twist.angular.z = float(data.qvel[5])
+
+    pose_pub.publish(pose_msg)
+    twist_pub.publish(twist_msg)
+
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
     # print(backward_kinematics_2d(x_home, z_home, hu, hl))
     # print(np.rad2deg(backward_kinematics_2d(x_home, z_home, hu, hl)))
 
-    pub_node = rclpy.create_node("imu_publisher")
-    imu_pub = pub_node.create_publisher(Imu, "imu/data", 10)
+    pub_imu_node = rclpy.create_node("imu_publisher")
+    imu_pub = pub_imu_node.create_publisher(Imu, "imu/data_raw", 10)
+
+    pose_pub = pub_imu_node.create_publisher(PoseStamped,  "/a1/base/ground_truth_pose", 10)
+    twist_pub = pub_imu_node.create_publisher(TwistStamped, "/a1/base/ground_truth_twist", 10)
+
+    pub_joint_node = rclpy.create_node("joint_state_publisher")
+    joint_pub = pub_joint_node.create_publisher(JointState, "joint_states",10)
 
     gyro_sensor = model.sensor("imu_gyro")
     acc_sensor  = model.sensor("imu_acc")
@@ -146,6 +196,9 @@ def main():
             if abs(cmd_linear_x) < linear_deadzone and abs(cmd_angular_z) < angular_deadzone:
                 data.ctrl[:] = ctrl_home
                 mujoco.mj_step(model, data)
+                publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
+                publish_joint_states(pub_joint_node, joint_pub, data)
+                publish_base_pose(pose_pub, pub_imu_node, twist_pub)
                 v.sync()
                 continue
             base_step = k_lin * cmd_linear_x
@@ -180,10 +233,13 @@ def main():
 
             data.ctrl[:] = ctrl
             mujoco.mj_step(model, data)
-            publish_imu(pub_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
+            publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
+            publish_joint_states(pub_joint_node, joint_pub, data)
+            publish_base_pose(pose_pub, pub_imu_node, twist_pub)
             v.sync()
         cmd_node.destroy_node()
-        pub_node.destroy_node()
+        pub_imu_node.destroy_node()
+        pub_joint_node.destroy_node()
         rclpy.shutdown()
 
 if __name__ == "__main__":
