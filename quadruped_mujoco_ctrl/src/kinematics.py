@@ -17,6 +17,7 @@ def backward_kinematics_3d(x, y, z, h, hu, hl):
     hip_angle: 髖關節角度 (rad)
     knee_angle: 膝關節角度 (rad)
     """
+
     D = np.sqrt(np.square(y) + np.square(z))
     L = np.sqrt(np.square(D) - np.square(h))
 
@@ -48,6 +49,7 @@ def backward_kinematics_2d(x, z, hu, hl):
     hip_angle: 髖關節角度 (rad)
     knee_angle: 膝關節角度 (rad)
     """
+
     S = np.sqrt(np.square(x) + np.square(z))
     N = (np.square(S) - np.square(hl) - np.square(hu)) / (2 * hu * hl)
     N = np.clip(N, -1.0, 1.0)  # 確保 n 在 [-1, 1] 範圍
@@ -71,6 +73,7 @@ def forward_kinematics_2d(hip_angle, knee_angle, hu, hl):
     x: 末端位置的x座標
     z: 末端位置的z座標
     """
+    
     x = hu * np.sin(hip_angle) + hl * np.sin(hip_angle + knee_angle)
     z = -hu * np.cos(hip_angle) - hl * np.cos(hip_angle + knee_angle)
     return x, z

@@ -9,6 +9,7 @@ from kinematics import backward_kinematics_2d, forward_kinematics_2d
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
 from sensor_msgs.msg import Imu, JointState
+from std_msgs.msg import Bool
 
 
 x_home, z_home = 0.0, -0.24864398730826576
@@ -132,6 +133,37 @@ def publish_base_pose(pose_pub, pose_node, twist_pub):
     pose_pub.publish(pose_msg)
     twist_pub.publish(twist_msg)
 
+def detect_foot_contact(data, foot_body_ids, model):
+
+    contacts = {
+        "FR": False,
+        "FL": False,
+        "RR": False,
+        "RL": False
+    }
+    for i in range(data.ncon):
+
+        con = data.contact[i]
+        g1 = int(con.geom[1])
+        g2 = int(con.geom[2])
+        b1 = int(model.geom_bodyid[g1])
+        b2 = int(model.geom_bodyid[g2])
+
+        for leg, body_id in foot_body_ids.items():
+            if b1 == body_id or b2 == body_id:
+                contacts[leg] = True
+
+    return contacts
+
+def publish_foot_contacts(contacts, contact_pubs):
+
+    for leg in contact_pubs:
+        pub = contact_pubs[leg]
+        msg = Bool()
+        msg.data = contacts[leg]
+
+        pub.publish(msg)
+
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
@@ -144,6 +176,22 @@ def main():
     pose_pub = pub_imu_node.create_publisher(PoseStamped,  "/a1/base/ground_truth_pose", 10)
     twist_pub = pub_imu_node.create_publisher(TwistStamped, "/a1/base/ground_truth_twist", 10)
 
+    #detect foot contact
+    foot_body_ids ={
+        "FR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FR_foot"),
+        "FL": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FL_foot"),
+        "RR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "RR_foot"),
+        "RL": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "RL_foot"),
+    }
+
+    contact_pubs ={
+        "FR": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/FR", 10),
+        "FL": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/FL", 10),
+        "RR": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/RR", 10),
+        "RL": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/RL", 10),
+    }
+    contacts = detect_foot_contact(data, foot_body_ids, model)
+
     pub_joint_node = rclpy.create_node("joint_state_publisher")
     joint_pub = pub_joint_node.create_publisher(JointState, "joint_states",10)
 
@@ -154,7 +202,6 @@ def main():
 
     acc_adr = int(np.asarray(acc_sensor.adr).item())
     acc_dim = int(np.asarray(acc_sensor.dim).item())
-
 
     x, z = forward_kinematics_2d(hip_angle, knee_angle, hu, hl)
     # print("FK:", x, z)
@@ -199,6 +246,7 @@ def main():
                 publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
                 publish_joint_states(pub_joint_node, joint_pub, data)
                 publish_base_pose(pose_pub, pub_imu_node, twist_pub)
+                publish_foot_contacts(contacts, contact_pubs)
                 v.sync()
                 continue
             base_step = k_lin * cmd_linear_x
@@ -236,6 +284,7 @@ def main():
             publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
             publish_joint_states(pub_joint_node, joint_pub, data)
             publish_base_pose(pose_pub, pub_imu_node, twist_pub)
+            publish_foot_contacts(contacts, contact_pubs)
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()
