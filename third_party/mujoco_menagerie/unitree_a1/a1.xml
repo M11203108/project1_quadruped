@@ -104,6 +104,7 @@
             <geom class="calf1"/>
             <geom class="calf2"/>
             <geom class="foot"/>
+            <site name="fr_touch_site" type="sphere" pos="0 0 -0.2" size="0.025"/>
           </body>
         </body>
       </body>
@@ -130,6 +131,7 @@
             <geom class="calf1"/>
             <geom class="calf2"/>
             <geom class="foot"/>
+            <site name="fl_touch_site" type="sphere" pos="0 0 -0.2" size="0.025"/>
           </body>
         </body>
       </body>
@@ -155,6 +157,7 @@
             <geom class="calf1"/>
             <geom class="calf2"/>
             <geom class="foot"/>
+            <site name="rr_touch_site" type="sphere" pos="0 0 -0.2" size="0.025"/>
           </body>
         </body>
       </body>
@@ -180,6 +183,7 @@
             <geom class="calf1"/>
             <geom class="calf2"/>
             <geom class="foot"/>
+            <site name="rl_touch_site" type="sphere" pos="0 0 -0.2" size="0.025"/>
           </body>
         </body>
       </body>
@@ -189,6 +193,11 @@
   <sensor>
     <gyro name="imu_gyro" site="imu_site"/>
     <accelerometer name="imu_acc" site="imu_site"/>
+
+    <touch name="fr_touch" site="fr_touch_site"/>
+    <touch name="fl_touch" site="fl_touch_site"/>
+    <touch name="rr_touch" site="rr_touch_site"/>
+    <touch name="rl_touch" site="rl_touch_site"/>
   </sensor>
 
   <actuator>

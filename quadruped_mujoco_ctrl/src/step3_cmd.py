@@ -15,10 +15,10 @@ from std_msgs.msg import Bool
 x_home, z_home = 0.0, -0.24864398730826576
 hip_angle, knee_angle = 0.9, -1.8
 hu, hl = 0.2, 0.2
-lift_height = 0.035
+lift_height = 0.04
 k_lin = 1.0
 k_yaw = 0.25
-T = 0.50  # 每 1 秒切換一次
+T = 0.80  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
 xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
 # Load model
@@ -144,8 +144,8 @@ def detect_foot_contact(data, foot_body_ids, model):
     for i in range(data.ncon):
 
         con = data.contact[i]
-        g1 = int(con.geom[1])
-        g2 = int(con.geom[2])
+        g1 = int(con.geom[0])
+        g2 = int(con.geom[1])
         b1 = int(model.geom_bodyid[g1])
         b2 = int(model.geom_bodyid[g2])
 
@@ -178,19 +178,19 @@ def main():
 
     #detect foot contact
     foot_body_ids ={
-        "FR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FR_foot"),
-        "FL": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FL_foot"),
-        "RR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "RR_foot"),
-        "RL": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "RL_foot"),
+        "FR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FR_calf"),
+        "FL": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FL_calf"),
+        "RR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "RR_calf"),
+        "RL": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "RL_calf"),
     }
 
     contact_pubs ={
-        "FR": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/FR", 10),
-        "FL": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/FL", 10),
-        "RR": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/RR", 10),
-        "RL": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/RL", 10),
+        "FR": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/fr", 10),
+        "FL": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/fl", 10),
+        "RR": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/rr", 10),
+        "RL": pub_imu_node.create_publisher(Bool, "/a1/foot_contact/rl", 10),
     }
-    contacts = detect_foot_contact(data, foot_body_ids, model)
+    
 
     pub_joint_node = rclpy.create_node("joint_state_publisher")
     joint_pub = pub_joint_node.create_publisher(JointState, "joint_states",10)
@@ -231,7 +231,6 @@ def main():
     rl_hip  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
     rl_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
-    t0 = time.perf_counter() # 記錄起始時間
 
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
@@ -243,19 +242,23 @@ def main():
             if abs(cmd_linear_x) < linear_deadzone and abs(cmd_angular_z) < angular_deadzone:
                 data.ctrl[:] = ctrl_home
                 mujoco.mj_step(model, data)
+                # contacts = detect_foot_contact(data, foot_body_ids, model)
                 publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
                 publish_joint_states(pub_joint_node, joint_pub, data)
                 publish_base_pose(pose_pub, pub_imu_node, twist_pub)
-                publish_foot_contacts(contacts, contact_pubs)
+                # publish_foot_contacts(contacts, contact_pubs)
                 v.sync()
                 continue
-            base_step = k_lin * cmd_linear_x
-            turn_step = k_yaw * cmd_angular_z
+            max_step = 0.04
+            max_turn = 0.02
+
+            base_step = np.clip(k_lin * cmd_linear_x, -max_step, max_step)
+            turn_step = np.clip(k_yaw * cmd_angular_z, -max_turn, max_turn)
             left_step_length = base_step - turn_step
             right_step_length = base_step + turn_step
-            t =time.perf_counter() - t0 # 計算經過的時間
+            t = data.time# 計算經過的時間
             phase, active_pair, s = get_phase(t, T)
-            print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length)
+            # print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length)
 
             ctrl = ctrl_home.copy()
         
@@ -281,10 +284,11 @@ def main():
 
             data.ctrl[:] = ctrl
             mujoco.mj_step(model, data)
+            # contacts = detect_foot_contact(data, foot_body_ids, model)
             publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
             publish_joint_states(pub_joint_node, joint_pub, data)
             publish_base_pose(pose_pub, pub_imu_node, twist_pub)
-            publish_foot_contacts(contacts, contact_pubs)
+            # publish_foot_contacts(contacts, contact_pubs)
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()
