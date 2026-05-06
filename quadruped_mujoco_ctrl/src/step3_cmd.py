@@ -9,7 +9,7 @@ from kinematics import backward_kinematics_2d, forward_kinematics_2d
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
 from sensor_msgs.msg import Imu, JointState
-from std_msgs.msg import Bool
+from std_msgs.msg import Bool, Float32
 
 
 x_home, z_home = 0.0, -0.24864398730826576
@@ -88,6 +88,21 @@ def publish_imu(gyro_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim):
     msg.linear_acceleration.z = float(acc[2])
 
     imu_pub.publish(msg)
+
+def publish_touch_sensor(touch_pubs ,data, fl_touch_adr, fr_touch_adr, rr_touch_adr, rl_touch_adr):
+
+    forces= {
+        "FR": float(data.sensordata[fr_touch_adr]),
+        "FL": float(data.sensordata[fl_touch_adr]),
+        "RR": float(data.sensordata[rr_touch_adr]),
+        "RL": float(data.sensordata[rl_touch_adr]),
+    }
+    for leg, pub in touch_pubs.items():
+        msg = Float32()
+        msg.data = forces[leg]
+        pub.publish(msg)
+
+    return forces
 
 def publish_joint_states(joint_node, joint_pub, data):
     msg = JointState()
@@ -175,7 +190,14 @@ def main():
 
     pose_pub = pub_imu_node.create_publisher(PoseStamped,  "/a1/base/ground_truth_pose", 10)
     twist_pub = pub_imu_node.create_publisher(TwistStamped, "/a1/base/ground_truth_twist", 10)
-
+    
+    pub_touch_node = rclpy.create_node("touch_sensor_publisher")
+    touch_pubs = {
+        "FR": pub_touch_node.create_publisher(Float32, "/a1/touch/fr", 10),
+        "FL": pub_touch_node.create_publisher(Float32, "/a1/touch/fl", 10),
+        "RR": pub_touch_node.create_publisher(Float32, "/a1/touch/rr", 10),
+        "RL": pub_touch_node.create_publisher(Float32, "/a1/touch/rl", 10),
+    }
     #detect foot contact
     foot_body_ids ={
         "FR": mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "FR_calf"),
@@ -195,6 +217,7 @@ def main():
     pub_joint_node = rclpy.create_node("joint_state_publisher")
     joint_pub = pub_joint_node.create_publisher(JointState, "joint_states",10)
 
+    #imu sensor adr and dim
     gyro_sensor = model.sensor("imu_gyro")
     acc_sensor  = model.sensor("imu_acc")
     gyro_adr = int(np.asarray(gyro_sensor.adr).item())
@@ -202,6 +225,17 @@ def main():
 
     acc_adr = int(np.asarray(acc_sensor.adr).item())
     acc_dim = int(np.asarray(acc_sensor.dim).item())
+
+    #touch sensor adr
+    fl_touch_sensor = model.sensor("fl_touch")
+    fr_touch_sensor = model.sensor("fr_touch")
+    rr_touch_sensor = model.sensor("rr_touch")
+    rl_touch_sensor = model.sensor("rl_touch")
+
+    fl_touch_sensor_adr = int(np.asarray(fl_touch_sensor.adr).item())
+    fr_touch_sensor_adr = int(np.asarray(fr_touch_sensor.adr).item())
+    rr_touch_sensor_adr = int(np.asarray(rr_touch_sensor.adr).item())
+    rl_touch_sensor_adr = int(np.asarray(rl_touch_sensor.adr).item())
 
     x, z = forward_kinematics_2d(hip_angle, knee_angle, hu, hl)
     # print("FK:", x, z)
@@ -246,7 +280,10 @@ def main():
                 publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
                 publish_joint_states(pub_joint_node, joint_pub, data)
                 publish_base_pose(pose_pub, pub_imu_node, twist_pub)
+
                 # publish_foot_contacts(contacts, contact_pubs)
+                forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
+                print(forces)
                 v.sync()
                 continue
             max_step = 0.04
@@ -289,6 +326,8 @@ def main():
             publish_joint_states(pub_joint_node, joint_pub, data)
             publish_base_pose(pose_pub, pub_imu_node, twist_pub)
             # publish_foot_contacts(contacts, contact_pubs)
+            forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
+            print(forces)
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()

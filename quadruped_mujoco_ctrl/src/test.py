@@ -33,6 +33,16 @@ LEG_CFG = {
     "RL": {"group": "rear",  "hip_sign": 1.0, "knee_sign": 1.0, "hip_offset": 0.0, "knee_offset": 0.0},
 }
 
+def publish_touch_sensor(data, fl_touch_adr, fr_touch_adr, rr_touch_adr, rl_touch_adr):
+
+    forces= {
+        "FR": float(data.sensordata[fr_touch_adr]),
+        "FL": float(data.sensordata[fl_touch_adr]),
+        "RR": float(data.sensordata[rr_touch_adr]),
+        "RL": float(data.sensordata[rl_touch_adr]),
+    }
+    return forces
+
 def get_phase(t, T):
     phase = (t % T) / T # % 取餘數, t=0.2 → t%T = 0.2
     if phase < 0.5:
@@ -145,6 +155,9 @@ def main():
     ctrl_home = data.ctrl.copy() # 取得當前的控制輸入，作為目標控制輸入
     ctrl_range = model.actuator_ctrlrange.copy() # 取得控制輸入的範圍
 
+    pub_touch_node = rclpy.create_node("touch_sensor_publisher")
+    
+
     fr_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_thigh")
     fr_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_calf")
     fl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_thigh")
@@ -158,6 +171,16 @@ def main():
     fl_abd = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_hip")
     rr_abd = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_hip")
     rl_abd = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_hip")
+
+    fl_touch_sensor = model.sensor("fl_touch")
+    fr_touch_sensor = model.sensor("fr_touch")
+    rr_touch_sensor = model.sensor("rr_touch")
+    rl_touch_sensor = model.sensor("rl_touch")
+
+    fl_touch_sensor_adr = int(np.asarray(fl_touch_sensor.adr).item())
+    fr_touch_sensor_adr = int(np.asarray(fr_touch_sensor.adr).item())
+    rr_touch_sensor_adr = int(np.asarray(rr_touch_sensor.adr).item())
+    rl_touch_sensor_adr = int(np.asarray(rl_touch_sensor.adr).item())
 
 
     with viewer.launch_passive(model, data) as v:
@@ -254,6 +277,9 @@ def main():
                 x_fl, z_fl = support_x, support_z
                 x_rr, z_rr = support_x, support_z
                 x_rl, z_rl = support_x, support_z
+
+            forces = publish_touch_sensor( data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
+            print(forces)
 
             set_leg_ctrl(ctrl, "FR", fr_thigh, fr_calf, x_fr, z_fr, hu, hl, ctrl_range)
             set_leg_ctrl(ctrl, "FL", fl_thigh, fl_calf, x_fl, z_fl, hu, hl, ctrl_range)
