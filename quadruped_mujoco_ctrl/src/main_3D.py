@@ -5,7 +5,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from mujoco import viewer
-from kinematics import backward_kinematics_2d, forward_kinematics_2d
+from kinematics import backward_kinematics_3d, forward_kinematics_3d
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
 from sensor_msgs.msg import Imu, JointState
@@ -13,8 +13,12 @@ from std_msgs.msg import Bool, Float32
 
 
 x_home, z_home = 0.0, -0.24864398730826576
-hip_angle, knee_angle = 0.9, -1.8
-hu, hl = 0.2, 0.2
+y_fr_home = -0.08505
+y_fl_home = +0.08505
+y_rr_home = -0.08505
+y_rl_home = +0.08505
+abd_angle, hip_angle, knee_angle = 0.0, 0.9, -1.8
+h, hu, hl = 0.08505, 0.2, 0.2
 lift_height = 0.04
 k_lin = 1.0
 k_yaw = 0.25
@@ -62,12 +66,15 @@ def stance_traj(s, x_home, z_home, step_length):
     z = z_home
     return x, z
 
-def set_leg_ctrl(ctrl, hip_id, knee_id, x, z, hu, hl, ctrl_range):
-    hip_angle, knee_angle = backward_kinematics_2d(x, z, hu, hl)
-    hip_angle = np.clip(hip_angle, ctrl_range[hip_id, 0], ctrl_range[hip_id, 1])
-    knee_angle = np.clip(knee_angle, ctrl_range[knee_id, 0], ctrl_range[knee_id, 1])
-    ctrl[hip_id] = hip_angle
-    ctrl[knee_id] = knee_angle
+def set_leg_ctrl_3d(ctrl, abd_id, thigh_id, calf_id, x, y, z, h, hu, hl, side_angle, ctrl_range):
+    abd_angle, thigh_angle, calf_angle = backward_kinematics_3d(x, y, z, h, hu, hl, side_angle)
+    abd_angle = np.clip(abd_angle, ctrl_range[abd_id, 0], ctrl_range[abd_id, 1])
+    thigh_angle = np.clip(thigh_angle, ctrl_range[thigh_id, 0], ctrl_range[thigh_id, 1])
+    calf_angle = np.clip(calf_angle, ctrl_range[calf_id, 0], ctrl_range[calf_id, 1])
+
+    ctrl[abd_id] = abd_angle
+    ctrl[thigh_id] = thigh_angle
+    ctrl[calf_id] = calf_angle
 
 def publish_imu(gyro_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim):
     
@@ -238,10 +245,10 @@ def main():
     rr_touch_sensor_adr = int(np.asarray(rr_touch_sensor.adr).item())
     rl_touch_sensor_adr = int(np.asarray(rl_touch_sensor.adr).item())
 
-    x, z = forward_kinematics_2d(hip_angle, knee_angle, hu, hl)
+    # x,y,z = forward_kinematics_3d(abd_angle, hip_angle, knee_angle, h, hu, hl)
     # print("FK:", x, z)
 
-    hip2, knee2 = backward_kinematics_2d(x, z, hu, hl)
+    # abd2, hip2, knee2 = backward_kinematics_3d(x, y, z, h, hu, hl)
     # print("IK:", hip2, knee2)
 
     # print("FK->IK degree:", np.rad2deg([hip2, knee2]))
@@ -257,14 +264,21 @@ def main():
     ctrl_range = model.actuator_ctrlrange.copy() # 取得控制輸入的範圍
 
     # 找 FR 的 actuator index
-    fr_hip  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_thigh")
-    fr_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_calf")
-    fl_hip  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_thigh")
-    fl_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_calf")
-    rr_hip  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_thigh")
-    rr_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_calf")
-    rl_hip  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
-    rl_knee = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
+    fr_abd   = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_hip")
+    fr_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_thigh")
+    fr_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FR_calf")
+
+    fl_abd   = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_hip")
+    fl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_thigh")
+    fl_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "FL_calf")
+
+    rr_abd   = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_hip")
+    rr_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_thigh")
+    rr_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RR_calf")
+
+    rl_abd   = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_hip")
+    rl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
+    rl_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
 
     with viewer.launch_passive(model, data) as v:
@@ -275,7 +289,25 @@ def main():
             linear_deadzone = 0.05
             angular_deadzone = 0.1
             if abs(cmd_linear_x) < linear_deadzone and abs(cmd_angular_z) < angular_deadzone:
-                data.ctrl[:] = ctrl_home
+                # data.ctrl[:] = ctrl_home
+                ctrl = ctrl_home.copy()
+                set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
+                                x_home, y_fr_home, z_home,
+                                h, hu, hl, -1.0, ctrl_range)
+
+                set_leg_ctrl_3d(ctrl, fl_abd, fl_thigh, fl_calf,
+                                x_home, y_fl_home, z_home,
+                                h, hu, hl, +1.0, ctrl_range)
+
+                set_leg_ctrl_3d(ctrl, rr_abd, rr_thigh, rr_calf,
+                                x_home, y_rr_home, z_home,
+                                h, hu, hl, -1.0, ctrl_range)
+
+                set_leg_ctrl_3d(ctrl, rl_abd, rl_thigh, rl_calf,
+                                x_home, y_rl_home, z_home,
+                                h, hu, hl, +1.0, ctrl_range)
+
+                data.ctrl[:] = ctrl
                 mujoco.mj_step(model, data)
                 # contacts = detect_foot_contact(data, foot_body_ids, model)
                 publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
@@ -301,24 +333,32 @@ def main():
             ctrl = ctrl_home.copy()
         
 
-            if active_pair == "A":
-                x_fr, z_fr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
-                x_rl, z_rl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
+            # if active_pair == "A":
+            #     x_fr, z_fr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
+            #     x_rl, z_rl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
 
-                x_rr, z_rr = stance_traj(s, x_home, z_home, right_step_length)
-                x_fl, z_fl = stance_traj(s, x_home, z_home, left_step_length)
+            #     x_rr, z_rr = stance_traj(s, x_home, z_home, right_step_length)
+            #     x_fl, z_fl = stance_traj(s, x_home, z_home, left_step_length)
 
-            else:
-                x_fl, z_fl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
-                x_rr, z_rr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
+            # else:
+            #     x_fl, z_fl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
+            #     x_rr, z_rr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
 
-                x_fr, z_fr = stance_traj(s, x_home, z_home, right_step_length)
-                x_rl, z_rl = stance_traj(s, x_home, z_home, left_step_length)
+            #     x_fr, z_fr = stance_traj(s, x_home, z_home, right_step_length)
+            #     x_rl, z_rl = stance_traj(s, x_home, z_home, left_step_length)
 
-            set_leg_ctrl(ctrl, fr_hip, fr_knee, x_fr, z_fr, hu, hl, ctrl_range)
-            set_leg_ctrl(ctrl, fl_hip, fl_knee, x_fl, z_fl, hu, hl, ctrl_range)
-            set_leg_ctrl(ctrl, rr_hip, rr_knee, x_rr, z_rr, hu, hl, ctrl_range)
-            set_leg_ctrl(ctrl, rl_hip, rl_knee, x_rl, z_rl, hu, hl, ctrl_range)
+            set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
+                            x_home, y_fr_home, z_home,
+                            h, hu, hl, -1.0, ctrl_range)
+            set_leg_ctrl_3d(ctrl, fl_abd, fl_thigh, fl_calf,
+                            x_home, y_fl_home, z_home,
+                            h, hu, hl, +1.0, ctrl_range)
+            set_leg_ctrl_3d(ctrl, rr_abd, rr_thigh, rr_calf,
+                            x_home, y_rr_home, z_home,
+                            h, hu, hl, -1.0, ctrl_range)
+            set_leg_ctrl_3d(ctrl, rl_abd, rl_thigh, rl_calf,
+                            x_home, y_rl_home, z_home,
+                            h, hu, hl, +1.0, ctrl_range)
 
             data.ctrl[:] = ctrl
             mujoco.mj_step(model, data)
