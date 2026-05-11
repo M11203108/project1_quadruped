@@ -6,6 +6,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped, PoseStamped
 from mujoco import viewer
 from kinematics import backward_kinematics_3d, forward_kinematics_3d
+from unload_controller import check_com_margin, get_support_legs
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
 from sensor_msgs.msg import Imu, JointState
@@ -76,6 +77,33 @@ def set_leg_ctrl_3d(ctrl, abd_id, thigh_id, calf_id, x, y, z, h, hu, hl, side_an
     ctrl[thigh_id] = thigh_angle
     ctrl[calf_id] = calf_angle
 
+def detect_foot_contact(data, foot_body_ids, model):
+
+    contacts = {
+        "FR": False,
+        "FL": False,
+        "RR": False,
+        "RL": False
+    }
+    for i in range(data.ncon):
+
+        con = data.contact[i]
+        g1 = int(con.geom[0])
+        g2 = int(con.geom[1])
+        b1 = int(model.geom_bodyid[g1])
+        b2 = int(model.geom_bodyid[g2])
+
+        for leg, body_id in foot_body_ids.items():
+            if b1 == body_id or b2 == body_id:
+                contacts[leg] = True
+
+    return contacts
+
+def get_com_xy(model, data):
+    trunk_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "trunk")
+    com_xyz = data.subtree_com[trunk_id]
+    return np.array([float(com_xyz[0]), float(com_xyz[1])])
+
 def publish_imu(gyro_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim):
     
     gyro = np.array(data.sensordata[gyro_adr:gyro_adr + gyro_dim], copy=True)
@@ -111,22 +139,6 @@ def publish_touch_sensor(touch_pubs ,data, fl_touch_adr, fr_touch_adr, rr_touch_
 
     return forces
 
-
-def publish_joint_states(joint_node, joint_pub, data):
-    msg = JointState()
-    msg.header.stamp = joint_node.get_clock().now().to_msg()
-    msg.name = [
-        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
-        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
-        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
-        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
-    ]
-    msg.position = data.qpos[7:19].tolist()
-    msg.velocity = data.qvel[6:18].tolist()
-    msg.effort = []
-
-    joint_pub.publish(msg)
-
 def publish_base_pose(pose_pub, pose_node, twist_pub):
     pose_msg = PoseStamped()
     pose_msg.header.stamp = pose_node.get_clock().now().to_msg()
@@ -156,27 +168,20 @@ def publish_base_pose(pose_pub, pose_node, twist_pub):
     pose_pub.publish(pose_msg)
     twist_pub.publish(twist_msg)
 
-def detect_foot_contact(data, foot_body_ids, model):
+def publish_joint_states(joint_node, joint_pub, data):
+    msg = JointState()
+    msg.header.stamp = joint_node.get_clock().now().to_msg()
+    msg.name = [
+        "FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
+        "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
+        "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
+        "RL_hip_joint", "RL_thigh_joint", "RL_calf_joint",
+    ]
+    msg.position = data.qpos[7:19].tolist()
+    msg.velocity = data.qvel[6:18].tolist()
+    msg.effort = []
 
-    contacts = {
-        "FR": False,
-        "FL": False,
-        "RR": False,
-        "RL": False
-    }
-    for i in range(data.ncon):
-
-        con = data.contact[i]
-        g1 = int(con.geom[0])
-        g2 = int(con.geom[1])
-        b1 = int(model.geom_bodyid[g1])
-        b2 = int(model.geom_bodyid[g2])
-
-        for leg, body_id in foot_body_ids.items():
-            if b1 == body_id or b2 == body_id:
-                contacts[leg] = True
-
-    return contacts
+    joint_pub.publish(msg)
 
 def publish_foot_contacts(contacts, contact_pubs):
 
@@ -280,6 +285,12 @@ def main():
     rl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
     rl_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
+    phase = "UNLOAD"
+    swing_leg = "FR"
+    UNLOAD_ALPHA = 0.5
+    UNLOAD_FORCE_THRESHOLD = 23.0
+    LIFT_HEIGHT_TEST = 0.02
+    body_shift_cmd = np.array([0.0, 0.0])
 
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
@@ -290,29 +301,78 @@ def main():
             angular_deadzone = 0.1
             if abs(cmd_linear_x) < linear_deadzone and abs(cmd_angular_z) < angular_deadzone:
                 # data.ctrl[:] = ctrl_home
+                
+                
+                com_xy = get_com_xy(model, data)
+                stable, min_margin, correction = check_com_margin(swing_leg, com_xy, margin_threshold=0.02)
+                support_legs = get_support_legs(swing_leg)
+                if not stable:
+                    step_gain = 0.05
+                    max_step_shift = 0.002
+                    max_total_shift = 0.04
+
+                    shift_step = correction * step_gain
+                    shift_step = np.clip(shift_step, -max_step_shift, max_step_shift)
+
+                    body_shift_cmd += shift_step
+                    body_shift_cmd = np.clip(body_shift_cmd, -max_total_shift, max_total_shift)
+                    
+
+                else:
+                    # stable 之後先不要歸零，要維持目前重心偏移
+                    pass
+                foot_shift = -body_shift_cmd
+
+                foot_shift_x = foot_shift[0]
+                foot_shift_y = foot_shift[1]
+                x_fr, y_fr, z_fr = x_home, y_fr_home, z_home
+                x_fl, y_fl, z_fl = x_home, y_fl_home, z_home
+                x_rr, y_rr, z_rr = x_home, y_rr_home, z_home
+                x_rl, y_rl, z_rl = x_home, y_rl_home, z_home
+
+                if "FR" in support_legs:
+                    y_fr += foot_shift_y
+                    x_fr += foot_shift_x
+
+                if "FL" in support_legs:
+                    y_fl += foot_shift_y
+                    x_fl += foot_shift_x
+                
+                if "RR" in support_legs:
+                    y_rr += foot_shift_y
+                    x_rr += foot_shift_x
+                
+                if "RL" in support_legs:
+                    y_rl += foot_shift_y
+                    x_rl += foot_shift_x
+
+                # if phase == "UNLOAD" and forces[swing_leg] < UNLOAD_FORCE_THRESHOLD:
+                #     print("UNLOAD complete, switch to LIFT")
+                #     phase = "LIFT"
                 ctrl = ctrl_home.copy()
+
                 set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
-                                x_home, y_fr_home, z_home,
+                                x_fr, y_fr, z_fr,
                                 h, hu, hl, -1.0, ctrl_range)
 
                 set_leg_ctrl_3d(ctrl, fl_abd, fl_thigh, fl_calf,
-                                x_home, y_fl_home, z_home,
+                                x_fl, y_fl, z_fl,
                                 h, hu, hl, +1.0, ctrl_range)
 
                 set_leg_ctrl_3d(ctrl, rr_abd, rr_thigh, rr_calf,
-                                x_home, y_rr_home, z_home,
+                                x_rr, y_rr, z_rr,
                                 h, hu, hl, -1.0, ctrl_range)
 
                 set_leg_ctrl_3d(ctrl, rl_abd, rl_thigh, rl_calf,
-                                x_home, y_rl_home, z_home,
+                                x_rl, y_rl, z_rl,
                                 h, hu, hl, +1.0, ctrl_range)
 
                 data.ctrl[:] = ctrl
                 mujoco.mj_step(model, data)
                 # contacts = detect_foot_contact(data, foot_body_ids, model)
-                publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
-                publish_joint_states(pub_joint_node, joint_pub, data)
-                publish_base_pose(pose_pub, pub_imu_node, twist_pub)
+                # publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
+                # publish_joint_states(pub_joint_node, joint_pub, data)
+                # publish_base_pose(pose_pub, pub_imu_node, twist_pub)
 
                 # publish_foot_contacts(contacts, contact_pubs)
                 forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
