@@ -195,8 +195,6 @@ def publish_foot_contacts(contacts, contact_pubs):
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
-    # print(backward_kinematics_2d(x_home, z_home, hu, hl))
-    # print(np.rad2deg(backward_kinematics_2d(x_home, z_home, hu, hl)))
 
     pub_imu_node = rclpy.create_node("imu_publisher")
     imu_pub = pub_imu_node.create_publisher(Imu, "imu/data_raw", 10)
@@ -250,16 +248,6 @@ def main():
     rr_touch_sensor_adr = int(np.asarray(rr_touch_sensor.adr).item())
     rl_touch_sensor_adr = int(np.asarray(rl_touch_sensor.adr).item())
 
-    # x,y,z = forward_kinematics_3d(abd_angle, hip_angle, knee_angle, h, hu, hl)
-    # print("FK:", x, z)
-
-    # abd2, hip2, knee2 = backward_kinematics_3d(x, y, z, h, hu, hl)
-    # print("IK:", hip2, knee2)
-
-    # print("FK->IK degree:", np.rad2deg([hip2, knee2]))
-
-    # Load the MuJoCo model from an XML file
-
     key_name = "home"
     key_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_KEY, key_name) # 取得 keyframe 的 ID
     mujoco.mj_resetDataKeyframe(model, data, key_id)
@@ -291,6 +279,14 @@ def main():
     UNLOAD_FORCE_THRESHOLD = 23.0
     LIFT_HEIGHT_TEST = 0.02
     body_shift_cmd = np.array([0.0, 0.0])
+    z_offset = {"FR": 0.0,
+                "FL": 0.0,
+                "RR": 0.0,
+                "RL": 0.0,}
+    MIN_SUPPORT_FORCE = 15.0
+    MAX_SUPPORT_FORCE = 65.0
+    Z_STEP = 0.0005
+    Z_LIMIT = 0.006
 
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
@@ -300,13 +296,12 @@ def main():
             linear_deadzone = 0.05
             angular_deadzone = 0.1
             if abs(cmd_linear_x) < linear_deadzone and abs(cmd_angular_z) < angular_deadzone:
-                # data.ctrl[:] = ctrl_home
-                
                 
                 com_xy = get_com_xy(model, data)
                 stable, min_margin, correction = check_com_margin(swing_leg, com_xy, margin_threshold=0.02)
                 support_legs = get_support_legs(swing_leg)
-                if not stable:
+                
+                if stable == False:
                     step_gain = 0.05
                     max_step_shift = 0.002
                     max_total_shift = 0.04
@@ -316,19 +311,18 @@ def main():
 
                     body_shift_cmd += shift_step
                     body_shift_cmd = np.clip(body_shift_cmd, -max_total_shift, max_total_shift)
-                    
 
                 else:
                     # stable 之後先不要歸零，要維持目前重心偏移
                     pass
                 foot_shift = -body_shift_cmd
-
                 foot_shift_x = foot_shift[0]
                 foot_shift_y = foot_shift[1]
-                x_fr, y_fr, z_fr = x_home, y_fr_home, z_home
-                x_fl, y_fl, z_fl = x_home, y_fl_home, z_home
-                x_rr, y_rr, z_rr = x_home, y_rr_home, z_home
-                x_rl, y_rl, z_rl = x_home, y_rl_home, z_home
+
+                x_fr, y_fr, z_fr = x_home, y_fr_home, z_home + z_offset["FR"]
+                x_fl, y_fl, z_fl = x_home, y_fl_home, z_home + z_offset["FL"]
+                x_rr, y_rr, z_rr = x_home, y_rr_home, z_home + z_offset["RR"]
+                x_rl, y_rl, z_rl = x_home, y_rl_home, z_home + z_offset["RL"]
 
                 if "FR" in support_legs:
                     y_fr += foot_shift_y
@@ -346,9 +340,6 @@ def main():
                     y_rl += foot_shift_y
                     x_rl += foot_shift_x
 
-                # if phase == "UNLOAD" and forces[swing_leg] < UNLOAD_FORCE_THRESHOLD:
-                #     print("UNLOAD complete, switch to LIFT")
-                #     phase = "LIFT"
                 ctrl = ctrl_home.copy()
 
                 set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
@@ -366,17 +357,22 @@ def main():
                 set_leg_ctrl_3d(ctrl, rl_abd, rl_thigh, rl_calf,
                                 x_rl, y_rl, z_rl,
                                 h, hu, hl, +1.0, ctrl_range)
-
+                
                 data.ctrl[:] = ctrl
                 mujoco.mj_step(model, data)
-                # contacts = detect_foot_contact(data, foot_body_ids, model)
-                # publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
-                # publish_joint_states(pub_joint_node, joint_pub, data)
-                # publish_base_pose(pose_pub, pub_imu_node, twist_pub)
-
-                # publish_foot_contacts(contacts, contact_pubs)
                 forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
                 print(forces)
+
+                for leg in support_legs:
+                    if forces[leg]<MIN_SUPPORT_FORCE:
+                        z_offset[leg] -=  Z_STEP
+
+                    elif forces[leg]>MAX_SUPPORT_FORCE:
+                        z_offset[leg] += Z_STEP
+                        
+                    z_offset[leg] = np.clip(z_offset[leg],-Z_LIMIT,Z_LIMIT)
+                        
+                
                 v.sync()
                 continue
             max_step = 0.04
@@ -391,21 +387,6 @@ def main():
             # print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length)
 
             ctrl = ctrl_home.copy()
-        
-
-            # if active_pair == "A":
-            #     x_fr, z_fr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
-            #     x_rl, z_rl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
-
-            #     x_rr, z_rr = stance_traj(s, x_home, z_home, right_step_length)
-            #     x_fl, z_fl = stance_traj(s, x_home, z_home, left_step_length)
-
-            # else:
-            #     x_fl, z_fl = swing_traj(s, x_home, z_home, left_step_length, lift_height)
-            #     x_rr, z_rr = swing_traj(s, x_home, z_home, right_step_length, lift_height)
-
-            #     x_fr, z_fr = stance_traj(s, x_home, z_home, right_step_length)
-            #     x_rl, z_rl = stance_traj(s, x_home, z_home, left_step_length)
 
             set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
                             x_home, y_fr_home, z_home,
