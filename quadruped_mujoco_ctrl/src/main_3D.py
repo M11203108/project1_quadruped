@@ -275,18 +275,22 @@ def main():
 
     phase = "UNLOAD"
     swing_leg = "FR"
-    UNLOAD_ALPHA = 0.5
-    UNLOAD_FORCE_THRESHOLD = 23.0
-    LIFT_HEIGHT_TEST = 0.02
     body_shift_cmd = np.array([0.0, 0.0])
     z_offset = {"FR": 0.0,
                 "FL": 0.0,
                 "RR": 0.0,
                 "RL": 0.0,}
-    MIN_SUPPORT_FORCE = 15.0
-    MAX_SUPPORT_FORCE = 65.0
-    Z_STEP = 0.0005
-    Z_LIMIT = 0.006
+    desired_forces = {
+        "FR": 8.0,
+        "FL": 25.0,
+        "RR": 35.0,
+        "RL": 30.0,
+    }
+
+    K_FORCE = 0.00002
+    MAX_DZ = 0.00005
+    Z_DOWN_LIMIT = -0.008
+    Z_UP_LIMIT = 0.004
 
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
@@ -300,26 +304,19 @@ def main():
                 com_xy = get_com_xy(model, data)
                 stable, min_margin, correction = check_com_margin(swing_leg, com_xy, margin_threshold=0.02)
                 support_legs = get_support_legs(swing_leg)
-                
-                if stable == False:
-                    step_gain = 0.05
-                    max_step_shift = 0.002
-                    max_total_shift = 0.04
 
-                    shift_step = correction * step_gain
-                    shift_step = np.clip(shift_step, -max_step_shift, max_step_shift)
+                target_body_shift = np.array([-0.04, -0.03]) #-0.30, -0.04
+                SHIFT_ALPHA = 0.02
 
-                    body_shift_cmd += shift_step
-                    body_shift_cmd = np.clip(body_shift_cmd, -max_total_shift, max_total_shift)
+                body_shift_cmd += SHIFT_ALPHA * (target_body_shift - body_shift_cmd)
+                body_shift_cmd = np.clip(body_shift_cmd, -0.04, 0.04)
 
-                else:
-                    # stable 之後先不要歸零，要維持目前重心偏移
-                    pass
-                foot_shift = -body_shift_cmd
+                foot_shift = body_shift_cmd
                 foot_shift_x = foot_shift[0]
                 foot_shift_y = foot_shift[1]
 
-                x_fr, y_fr, z_fr = x_home, y_fr_home, z_home + z_offset["FR"]
+                fr_lift_test = 0.012
+                x_fr, y_fr, z_fr = x_home, y_fr_home, z_home + z_offset["FR"] + fr_lift_test
                 x_fl, y_fl, z_fl = x_home, y_fl_home, z_home + z_offset["FL"]
                 x_rr, y_rr, z_rr = x_home, y_rr_home, z_home + z_offset["RR"]
                 x_rl, y_rl, z_rl = x_home, y_rl_home, z_home + z_offset["RL"]
@@ -363,14 +360,25 @@ def main():
                 forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
                 print(forces)
 
-                for leg in support_legs:
-                    if forces[leg]<MIN_SUPPORT_FORCE:
-                        z_offset[leg] -=  Z_STEP
 
-                    elif forces[leg]>MAX_SUPPORT_FORCE:
-                        z_offset[leg] += Z_STEP
-                        
-                    z_offset[leg] = np.clip(z_offset[leg],-Z_LIMIT,Z_LIMIT)
+                for leg in support_legs:
+                    force_error = desired_forces[leg] - forces[leg]
+
+                    # measured 太小 → 需要多吃力 → 腳往下壓 → z_offset 變小
+                    # measured 太大 → 需要少吃力 → 腳往上收 → z_offset 變大
+                    dz = -K_FORCE * force_error
+                    dz = np.clip(dz, -MAX_DZ, MAX_DZ)
+
+                    z_offset[leg] += dz
+                    z_offset[leg] = float(np.clip(z_offset[leg], Z_DOWN_LIMIT, Z_UP_LIMIT))
+
+                z_offset["FR"] = min(z_offset["FR"] + 0.00002, Z_UP_LIMIT)
+                print(
+                    "FR unload test |",
+                    "forces:", {k: round(v, 1) for k, v in forces.items()},
+                    "z_offset:", {k: round(v, 4) for k, v in z_offset.items()},
+                    "body_shift:", np.round(body_shift_cmd, 4),
+                )
                         
                 
                 v.sync()
