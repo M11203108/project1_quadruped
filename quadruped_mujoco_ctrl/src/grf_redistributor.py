@@ -8,3 +8,21 @@ FOOT_XY_BODY = {
     "RR": np.array([-0.183, -0.132]),
     "RL": np.array([-0.183, +0.132]),
 }
+
+def get_support_legs(swing_leg):
+    support_legs = []
+    for leg in LEGS:
+        if leg != swing_leg:
+            support_legs.append(leg)
+    return support_legs
+
+def compute_cop_xy(forces):
+    """
+    輸入:每支腳的回傳力
+    輸出:壓力中心位置
+    """
+    
+if __name__ == "__main__":
+    for swing_leg in LEGS:
+        support_legs = get_support_legs(swing_leg)
+        print("swing_leg:", swing_leg, "support_legs:", support_legs)
