@@ -109,11 +109,18 @@ def compute_force_error(desired_forces, forces):
     force_error = {}
 
     for leg in LEGS:
-        desired = float(desired_forces.get(leg, 0.0))
+        desired = float(desired_forces.get(leg, 0.0)) #0.0=沒找到就是0.0
         measured = float(forces.get(leg, 0.0))
         force_error[leg] = desired - measured
 
     return force_error
+
+def compute_cop_error(swing_leg, forces):
+    target = compute_target_cop_xy(swing_leg)
+    measured = compute_cop_xy(forces)
+    cop_error = target - measured
+    return cop_error
+
 
 if __name__ == "__main__":
     forces = {
@@ -123,5 +130,10 @@ if __name__ == "__main__":
         "RL": 10.0,
     }
     desired_forces, debug = solve_desired_grf("FR", forces)
-    print(desired_forces)
-    print(debug)
+    force_error = compute_force_error(desired_forces, forces)
+    cop_error = compute_cop_error("FR", forces)
+
+    print("desired_forces:", desired_forces)
+    print("debug:", debug)
+    print("force_error:", force_error)
+    print("cop_error:", cop_error)
