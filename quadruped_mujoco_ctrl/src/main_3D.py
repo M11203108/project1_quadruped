@@ -7,6 +7,7 @@ from geometry_msgs.msg import TwistStamped, PoseStamped
 from mujoco import viewer
 from kinematics import backward_kinematics_3d, forward_kinematics_3d
 from unload_controller import check_com_margin, get_support_legs
+from grf_redistributor import compute_grf_redistribution
 from cmd_vel_sub import CmdVelSubscriber
 from pathlib import Path
 from sensor_msgs.msg import Imu, JointState
@@ -273,151 +274,10 @@ def main():
     rl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
     rl_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
-    phase = "UNLOAD"
-    swing_leg = "FR"
-    body_shift_cmd = np.array([0.0, 0.0])
-    z_offset = {"FR": 0.0,
-                "FL": 0.0,
-                "RR": 0.0,
-                "RL": 0.0,}
-    desired_forces = {
-        "FR": 8.0,
-        "FL": 25.0,
-        "RR": 35.0,
-        "RL": 30.0,
-    }
-
-    K_FORCE = 0.00002
-    MAX_DZ = 0.00005
-    Z_DOWN_LIMIT = -0.008
-    Z_UP_LIMIT = 0.004
-
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
-            rclpy.spin_once(cmd_node, timeout_sec=0.0) # 讓 ROS2 處理一次 callback，更新 cmd_node 的 cmd_vel
-            cmd_linear_x = cmd_node.cmd_linear_x # 前進為正，後退為負
-            cmd_angular_z = cmd_node.cmd_angular_z # 逆時針轉為正，順時針轉為負
-            linear_deadzone = 0.05
-            angular_deadzone = 0.1
-            if abs(cmd_linear_x) < linear_deadzone and abs(cmd_angular_z) < angular_deadzone:
-                
-                com_xy = get_com_xy(model, data)
-                stable, min_margin, correction = check_com_margin(swing_leg, com_xy, margin_threshold=0.02)
-                support_legs = get_support_legs(swing_leg)
-
-                target_body_shift = np.array([-0.04, -0.03]) #-0.30, -0.04
-                SHIFT_ALPHA = 0.02
-
-                body_shift_cmd += SHIFT_ALPHA * (target_body_shift - body_shift_cmd)
-                body_shift_cmd = np.clip(body_shift_cmd, -0.04, 0.04)
-
-                foot_shift = body_shift_cmd
-                foot_shift_x = foot_shift[0]
-                foot_shift_y = foot_shift[1]
-
-                fr_lift_test = 0.012
-                x_fr, y_fr, z_fr = x_home, y_fr_home, z_home + z_offset["FR"] + fr_lift_test
-                x_fl, y_fl, z_fl = x_home, y_fl_home, z_home + z_offset["FL"]
-                x_rr, y_rr, z_rr = x_home, y_rr_home, z_home + z_offset["RR"]
-                x_rl, y_rl, z_rl = x_home, y_rl_home, z_home + z_offset["RL"]
-
-                if "FR" in support_legs:
-                    y_fr += foot_shift_y
-                    x_fr += foot_shift_x
-
-                if "FL" in support_legs:
-                    y_fl += foot_shift_y
-                    x_fl += foot_shift_x
-                
-                if "RR" in support_legs:
-                    y_rr += foot_shift_y
-                    x_rr += foot_shift_x
-                
-                if "RL" in support_legs:
-                    y_rl += foot_shift_y
-                    x_rl += foot_shift_x
-
-                ctrl = ctrl_home.copy()
-
-                set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
-                                x_fr, y_fr, z_fr,
-                                h, hu, hl, -1.0, ctrl_range)
-
-                set_leg_ctrl_3d(ctrl, fl_abd, fl_thigh, fl_calf,
-                                x_fl, y_fl, z_fl,
-                                h, hu, hl, +1.0, ctrl_range)
-
-                set_leg_ctrl_3d(ctrl, rr_abd, rr_thigh, rr_calf,
-                                x_rr, y_rr, z_rr,
-                                h, hu, hl, -1.0, ctrl_range)
-
-                set_leg_ctrl_3d(ctrl, rl_abd, rl_thigh, rl_calf,
-                                x_rl, y_rl, z_rl,
-                                h, hu, hl, +1.0, ctrl_range)
-                
-                data.ctrl[:] = ctrl
-                mujoco.mj_step(model, data)
-                forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
-                print(forces)
-
-
-                for leg in support_legs:
-                    force_error = desired_forces[leg] - forces[leg]
-
-                    # measured 太小 → 需要多吃力 → 腳往下壓 → z_offset 變小
-                    # measured 太大 → 需要少吃力 → 腳往上收 → z_offset 變大
-                    dz = -K_FORCE * force_error
-                    dz = np.clip(dz, -MAX_DZ, MAX_DZ)
-
-                    z_offset[leg] += dz
-                    z_offset[leg] = float(np.clip(z_offset[leg], Z_DOWN_LIMIT, Z_UP_LIMIT))
-
-                z_offset["FR"] = min(z_offset["FR"] + 0.00002, Z_UP_LIMIT)
-                print(
-                    "FR unload test |",
-                    "forces:", {k: round(v, 1) for k, v in forces.items()},
-                    "z_offset:", {k: round(v, 4) for k, v in z_offset.items()},
-                    "body_shift:", np.round(body_shift_cmd, 4),
-                )
-                        
-                
-                v.sync()
-                continue
-            max_step = 0.04
-            max_turn = 0.02
-
-            base_step = np.clip(k_lin * cmd_linear_x, -max_step, max_step)
-            turn_step = np.clip(k_yaw * cmd_angular_z, -max_turn, max_turn)
-            left_step_length = base_step - turn_step
-            right_step_length = base_step + turn_step
-            t = data.time# 計算經過的時間
-            phase, active_pair, s = get_phase(t, T)
-            # print("cmd_linear_x:", cmd_linear_x, "cmd_angular_z:", cmd_angular_z, "left_step_length:", left_step_length, "right_step_length:", right_step_length)
-
-            ctrl = ctrl_home.copy()
-
-            set_leg_ctrl_3d(ctrl, fr_abd, fr_thigh, fr_calf,
-                            x_home, y_fr_home, z_home,
-                            h, hu, hl, -1.0, ctrl_range)
-            set_leg_ctrl_3d(ctrl, fl_abd, fl_thigh, fl_calf,
-                            x_home, y_fl_home, z_home,
-                            h, hu, hl, +1.0, ctrl_range)
-            set_leg_ctrl_3d(ctrl, rr_abd, rr_thigh, rr_calf,
-                            x_home, y_rr_home, z_home,
-                            h, hu, hl, -1.0, ctrl_range)
-            set_leg_ctrl_3d(ctrl, rl_abd, rl_thigh, rl_calf,
-                            x_home, y_rl_home, z_home,
-                            h, hu, hl, +1.0, ctrl_range)
-
-            data.ctrl[:] = ctrl
             mujoco.mj_step(model, data)
-            # contacts = detect_foot_contact(data, foot_body_ids, model)
-            publish_imu(pub_imu_node, gyro_adr, gyro_dim, imu_pub, acc_adr, acc_dim)
-            publish_joint_states(pub_joint_node, joint_pub, data)
-            publish_base_pose(pose_pub, pub_imu_node, twist_pub)
-            # publish_foot_contacts(contacts, contact_pubs)
-            forces = publish_touch_sensor(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
-            print(forces)
+
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()
