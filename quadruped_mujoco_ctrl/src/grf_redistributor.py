@@ -101,6 +101,19 @@ def solve_desired_grf(swing_leg, forces):
     }
     return desired_forces, debug_info
 
+def compute_force_error(desired_forces, forces):
+    """
+    輸入: desired期望支撐力，measured每腳的回傳力
+    輸出: 每腳的力誤差
+    """
+    force_error = {}
+
+    for leg in LEGS:
+        desired = float(desired_forces.get(leg, 0.0))
+        measured = float(forces.get(leg, 0.0))
+        force_error[leg] = desired - measured
+
+    return force_error
 
 if __name__ == "__main__":
     forces = {
