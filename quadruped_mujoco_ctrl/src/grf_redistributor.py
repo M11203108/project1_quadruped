@@ -32,9 +32,83 @@ def compute_cop_xy(forces):
         return np.array([0.0, 0.0])  #避免除以零
     return weighted_sum / total_force
 
-def 
+def compute_target_cop_xy(swing_leg, unload_gain=0.15):
+    """
+    輸入: 擺動腳
+    輸出: 目標壓力中心位置
+    """
+    support_legs = get_support_legs(swing_leg)
+
+    support_points = []
+    for leg in support_legs:
+        support_points.append(FOOT_XY_BODY[leg])
+    support_points = np.array(support_points)
+    support_center = np.mean(support_points, axis=0) #mean 矩陣平均
+    swing_point = FOOT_XY_BODY[swing_leg]
+    away_vec = support_center - swing_point
+    target_cop = support_center + unload_gain*away_vec
+    return target_cop
+
+def solve_desired_grf(swing_leg, forces):
+    """
+    卸重支撐腳的支撐力
+    """
+    support_legs = get_support_legs(swing_leg)
+    W = 0.0
+    for leg in LEGS:
+        W += max(float(forces.get(leg, 0.0)), 0.0)
+
+    target_cop = compute_target_cop_xy(swing_leg)
+    support_points = []
+    for leg in support_legs:
+        support_points.append(FOOT_XY_BODY[leg])
+    support_points = np.array(support_points)
+    A = np.array([
+        [1.0, 1.0, 1.0],
+        [support_points[0][0], support_points[1][0], support_points[2][0]],
+        [support_points[0][1], support_points[1][1], support_points[2][1]],
+    ])
+
+    b = np.array([
+        W,
+        W * target_cop[0],
+        W * target_cop[1],
+    ])
+
+    f_support = np.linalg.solve(A, b)
+    f_min = 5.0
+    f_max = 70.0
+
+    f_support = np.clip(f_support, f_min, f_max)
+
+    total_after_clip = np.sum(f_support)
+    if total_after_clip > 1e-6:
+        f_support = f_support * (W / total_after_clip)
+
+    desired_forces = {leg: 0.0 for leg in LEGS} #4隻腳初始為0
+    for leg ,force in zip(support_legs, f_support): #zip 兩個 list配起來
+        desired_forces[leg] = float(force)
+
+    desired_forces[swing_leg] = 0.0
+
+    measured_cop = compute_cop_xy(forces)
+    debug_info = {
+        "support_legs": support_legs,
+        "W": W,
+        "measured_cop": measured_cop,
+        "target_cop": target_cop,
+        "f_support": f_support,
+    }
+    return desired_forces, debug_info
+
 
 if __name__ == "__main__":
-    for swing_leg in LEGS:
-        support_legs = get_support_legs(swing_leg)
-        print("swing_leg:", swing_leg, "support_legs:", support_legs)
+    forces = {
+        "FR": 10.0,
+        "FL": 10.0,
+        "RR": 10.0,
+        "RL": 10.0,
+    }
+    desired_forces, debug = solve_desired_grf("FR", forces)
+    print(desired_forces)
+    print(debug)
