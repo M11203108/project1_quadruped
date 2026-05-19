@@ -121,6 +121,15 @@ def compute_cop_error(swing_leg, forces):
     cop_error = target - measured
     return cop_error
 
+def compute_grf_redistribution(swing_leg, forces):
+    desired_forces, debug_info = solve_desired_grf(swing_leg, forces)
+    force_error = compute_force_error(desired_forces, forces)
+    cop_error = compute_cop_error(swing_leg, forces)
+
+    debug_info["force_error"] = force_error
+    debug_info["cop_error"] = cop_error
+
+    return desired_forces, force_error, cop_error, debug_info
 
 if __name__ == "__main__":
     forces = {
@@ -129,11 +138,16 @@ if __name__ == "__main__":
         "RR": 10.0,
         "RL": 10.0,
     }
-    desired_forces, debug = solve_desired_grf("FR", forces)
-    force_error = compute_force_error(desired_forces, forces)
-    cop_error = compute_cop_error("FR", forces)
+    for swing_leg in LEGS:
+        desired_forces, force_error, cop_error, debug = compute_grf_redistribution(
+            swing_leg,
+            forces
+        )
 
-    print("desired_forces:", desired_forces)
-    print("debug:", debug)
-    print("force_error:", force_error)
-    print("cop_error:", cop_error)
+        print("\n====================")
+        print("swing_leg:", swing_leg)
+        print("desired_forces:", desired_forces)
+        print("force_error:", force_error)
+        print("measured_cop:", debug["measured_cop"])
+        print("target_cop:", debug["target_cop"])
+        print("cop_error:", cop_error)
