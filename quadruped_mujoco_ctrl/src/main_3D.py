@@ -35,6 +35,12 @@ FOOT_HOME = {
     "RR": np.array([x_home, y_rr_home, z_home]),
     "RL": np.array([x_home, y_rl_home, z_home]),
 }
+SIDE_SIGN = {
+    "FR": -1.0,
+    "RR": -1.0,
+    "FL": +1.0,
+    "RL": +1.0,
+}
 # Load model
 model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
@@ -289,8 +295,82 @@ def build_foot_targets(ctrl_state):
 
     return foot_targets
 
+def make_walk_config():
+    return {
+        "timing": {
+            "stand": 1.0,
+            "body_settle": 0.5,
+            "pre_lift_delay": 0.8,
+            "ready_hold": 0.3,
+        },
 
+        "force": {
+            "swing_ready": 12.0,
+            "swing_hold": 16.0,
+            "support_min": 12.0,
+            "support_max": 65.0,
+        },
+
+        "gain": {
+            "shift_alpha": 0.02,
+            "force_z": 0.0004,
+            "pre_lift": 0.002,
+        },
+
+        "limit": {
+            "pre_lift_max": 0.03,
+            "max_pre_lift_step": 0.00005,
+            "max_z_step": 0.00003,
+            "z_down": -0.004,
+            "z_up": 0.003,
+        },
+
+        "bias": {
+            "unload": {
+                "FR": np.array([-0.02, -0.012]),
+                "FL": np.array([-0.02, +0.012]),
+                "RR": np.array([+0.01, -0.010]),
+                "RL": np.array([+0.01, +0.010]),
+            },
+            "swing": {
+                "FR": np.array([-0.025, 0.0]),
+                "FL": np.array([-0.025, 0.0]),
+                "RR": np.array([+0.015, 0.0]),
+                "RL": np.array([+0.015, 0.0]),
+            },
+        },
+
+        "step": {
+            "length": 0.02,
+            "lift": 0.015,
+            "duration": 1.0,
+        },
+    }
     
+def apply_ik_control(foot_targets, actuator_ids, ctrl_home, ctrl_range):
+    ctrl = ctrl_home.copy()
+
+    for leg in LEGS:
+        x, y, z = foot_targets[leg]
+
+        abd_id, thigh_id, calf_id = actuator_ids[leg]
+
+        set_leg_ctrl_3d(
+            ctrl,
+            abd_id,
+            thigh_id,
+            calf_id,
+            x,
+            y,
+            z,
+            h,
+            hu,
+            hl,
+            SIDE_SIGN[leg],
+            ctrl_range,
+        )
+
+    data.ctrl[:] = ctrl
 
 def main():
     rclpy.init()
