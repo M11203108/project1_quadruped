@@ -27,6 +27,9 @@ k_yaw = 0.25
 T = 0.80  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
 xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
+LEGS = ["FR", "FL", "RR", "RL"]
+
+GAIT_ORDER = ["FR", "RL", "FL", "RR"]
 # Load model
 model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
@@ -193,6 +196,58 @@ def publish_foot_contacts(contacts, contact_pubs):
 
         pub.publish(msg)
 
+def init_walk_state():
+    """
+    初始化走路控制器狀態
+    控制器記憶
+    """
+    state = {
+        # 控制階段
+        "phase": "STAND",
+
+        "phase_time": 0.0,
+
+        # 抬腳順序
+        "swing_index": 0,
+
+        # 抬腳
+        "swing_leg": GAIT_ORDER[0],
+
+        # 身體支撐腳控制
+        "body_shift": np.array([0.0, 0.0]),
+        "target_body_shift": np.array([0.0, 0.0]),
+
+        # z 微調支撐力分配
+        "z_offset": {
+            "FR": 0.0,
+            "FL": 0.0,
+            "RR": 0.0,
+            "RL": 0.0,
+        },
+
+        # 每隻腳的預抬高度
+        "pre_lift": {
+            "FR": 0.0,
+            "FL": 0.0,
+            "RR": 0.0,
+            "RL": 0.0,
+        },
+
+        # 腳前後位移
+        "step_x": {
+            "FR": 0.0,
+            "FL": 0.0,
+            "RR": 0.0,
+            "RL": 0.0,
+        },
+
+        "ready_timer": 0.0,
+
+        "debug": {},
+    }
+
+    return state
+
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
@@ -274,6 +329,8 @@ def main():
     rl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
     rl_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
+    ctrl_state = init_walk_state()
+    print(ctrl_state)
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
             mujoco.mj_step(model, data)
