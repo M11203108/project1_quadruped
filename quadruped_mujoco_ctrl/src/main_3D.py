@@ -28,8 +28,13 @@ T = 0.80  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
 xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
 LEGS = ["FR", "FL", "RR", "RL"]
-
 GAIT_ORDER = ["FR", "RL", "FL", "RR"]
+FOOT_HOME = {
+    "FR": np.array([x_home, y_fr_home, z_home]),
+    "FL": np.array([x_home, y_fl_home, z_home]),
+    "RR": np.array([x_home, y_rr_home, z_home]),
+    "RL": np.array([x_home, y_rl_home, z_home]),
+}
 # Load model
 model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
@@ -248,6 +253,45 @@ def init_walk_state():
 
     return state
 
+def read_sensors(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr, cmd_node):
+    """
+    讀取感測器數據
+    """
+    forces = publish_touch_sensor(touch_pubs ,data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
+    sensors = {
+        "forces": forces,
+        # "cmd_vel_x": cmd_node.cmd_linear_x,
+        # "cmd_vel_z": cmd_node.cmd_linear_z,
+    }
+
+    return sensors
+
+def build_foot_targets(ctrl_state):
+    """
+    控制器狀態，產生四隻腳的目標位置
+    """
+    swing_leg = ctrl_state["swing_leg"]
+    support_legs = get_support_legs(swing_leg)
+    foot_targets = {}
+    for leg in LEGS:
+        target = FOOT_HOME[leg].copy()
+        target[0] += ctrl_state["step_x"][leg]
+
+        target[2] += ctrl_state["z_offset"][leg]
+
+        target[2] += ctrl_state["pre_lift"][leg]
+
+        foot_targets[leg] = target
+
+    for leg in support_legs:
+        foot_targets[leg][0] += ctrl_state["body_shift"][0]
+        foot_targets[leg][1] += ctrl_state["body_shift"][1]
+
+    return foot_targets
+
+
+    
+
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
@@ -333,8 +377,21 @@ def main():
     print(ctrl_state)
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
-            mujoco.mj_step(model, data)
+            rclpy.spin_once(cmd_node, timeout_sec=0.0)
 
+            sensors = read_sensors(
+                touch_pubs,
+                data,
+                fl_touch_sensor_adr,
+                fr_touch_sensor_adr,
+                rr_touch_sensor_adr,
+                rl_touch_sensor_adr,
+                cmd_node,
+            )
+
+            print(sensors)
+
+            mujoco.mj_step(model, data)
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()
