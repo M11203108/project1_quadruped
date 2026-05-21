@@ -1,35 +1,24 @@
-1. 如果沒有 cmd_vel
-   → phase = STAND
-   → body_shift / pre_lift / step_x 慢慢回到 0
+phase: STAND
+目的：等待 cmd_vel，保持站立
+做什麼：所有控制量慢慢回 0
+結束條件：cmd_vel 有輸入
 
-2. 如果有 cmd_vel，而且目前是 STAND
-   → 選目前的 swing_leg
-   → phase = PRE_UNLOAD
+phase: PRE_UNLOAD
+目的：抬腳前讓 swing_leg 卸重
+做什麼：body_shift、z_offset、pre_lift
+結束條件：swing_leg 足力低，其他三腳安全
 
-3. PRE_UNLOAD
-   → 抬腳前先卸重
-   → body_shift 往安全方向移動
-   → 用足力調整 z_offset
-   → 如果 swing_leg 足力夠小，而且其他三腳安全
-   → phase = SWING_FORWARD
+phase: SWING_FORWARD
+目的：讓 swing_leg 往前/往後擺
+做什麼：pre_lift 增加，step_x 根據 cmd_vel 改變
+結束條件：swing 時間完成
 
-4. SWING_FORWARD
-   → swing_leg 抬起
-   → 根據 cmd_vel 決定 step_x
-   → 如果 cmd_vel_x > 0，往前擺
-   → 如果 cmd_vel_x < 0，往後擺
-   → 如果 cmd_angular_z != 0，左右腳 step_x 不同
-   → 擺腳時間完成後
-   → phase = TOUCHDOWN
+phase: TOUCHDOWN
+目的：讓 swing_leg 放回地面
+做什麼：pre_lift 慢慢下降
+結束條件：swing_leg 足力恢復
 
-5. TOUCHDOWN
-   → swing_leg 慢慢放下
-   → 如果 swing_leg 足力恢復
-   → phase = RECOVER
-
-6. RECOVER
-   → body_shift 慢慢回中
-   → z_offset 慢慢回 0
-   → 短暫穩定一下
-   → 換下一隻腳
-   → phase = PRE_UNLOAD 或 STAND
+phase: RECOVER
+目的：讓機器人穩定，準備下一步
+做什麼：body_shift / z_offset 慢慢回穩
+結束條件：短暫等待後換下一隻腳

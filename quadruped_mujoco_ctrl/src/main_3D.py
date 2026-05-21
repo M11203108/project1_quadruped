@@ -28,7 +28,7 @@ T = 0.80  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
 xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
 LEGS = ["FR", "FL", "RR", "RL"]
-GAIT_ORDER = ["FR", "RL", "FL", "RR"]
+GAIT_ORDER = ["RL", "FR", "RR", "FL"]
 FOOT_HOME = {
     "FR": np.array([x_home, y_fr_home, z_home]),
     "FL": np.array([x_home, y_fl_home, z_home]),
@@ -266,8 +266,8 @@ def read_sensors(touch_pubs, data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_
     forces = publish_touch_sensor(touch_pubs ,data, fl_touch_sensor_adr, fr_touch_sensor_adr, rr_touch_sensor_adr, rl_touch_sensor_adr)
     sensors = {
         "forces": forces,
-        # "cmd_vel_x": cmd_node.cmd_linear_x,
-        # "cmd_vel_z": cmd_node.cmd_linear_z,
+        "cmd_vel_x": cmd_node.cmd_linear_x,
+        "cmd_vel_z": cmd_node.cmd_angular_z,
     }
 
     return sensors
@@ -372,6 +372,42 @@ def apply_ik_control(foot_targets, actuator_ids, ctrl_home, ctrl_range):
 
     data.ctrl[:] = ctrl
 
+def cmd_active(sensors):
+    return abs(sensors["cmd_vel_x"]) > 0.02 or abs(sensors["cmd_vel_z"]) > 0.05
+
+def switch_phase(ctrl_state, new_phase):
+    ctrl_state["phase"] = new_phase
+    ctrl_state["phase_time"] = 0.0
+    ctrl_state["ready_timer"] = 0.0
+
+def update_forward_walk_controller(ctrl_state, sensors, dt):
+    """
+    走路控制器主函式
+    ctrl_state: 控制階段、抬腳順序、身體位移
+    sensors: 腳接觸力、cmd_vel
+    dt: 時間步長
+    """
+    ctrl_state["phase_time"] += dt
+
+    phase = ctrl_state["phase"]
+
+    #stand
+    if phase == "STAND":
+        ctrl_state["target_body_shift"] = np.array([0.0, 0.0])
+        ctrl_state["body_shift"] = np.array([0.0, 0.0])
+
+        for leg in LEGS:
+                ctrl_state["z_offset"][leg] = 0.0
+                ctrl_state["pre_lift"][leg] = 0.0
+                ctrl_state["step_x"][leg] = 0.0
+
+        if cmd_active(sensors):
+                ctrl_state["swing_leg"] = GAIT_ORDER[ctrl_state["swing_index"]]
+                switch_phase(ctrl_state, "PRE_UNLOAD")
+    
+    return ctrl_state
+
+
 def main():
     rclpy.init()
     cmd_node = CmdVelSubscriber()
@@ -453,10 +489,19 @@ def main():
     rl_thigh = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_thigh")
     rl_calf  = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, "RL_calf")
 
+    actuator_ids = {
+        "FR": (fr_abd, fr_thigh, fr_calf),
+        "FL": (fl_abd, fl_thigh, fl_calf),
+        "RR": (rr_abd, rr_thigh, rr_calf),
+        "RL": (rl_abd, rl_thigh, rl_calf),
+    }
+
     ctrl_state = init_walk_state()
     print(ctrl_state)
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
+            dt = model.opt.timestep
+
             rclpy.spin_once(cmd_node, timeout_sec=0.0)
 
             sensors = read_sensors(
@@ -469,9 +514,28 @@ def main():
                 cmd_node,
             )
 
-            print(sensors)
+            ctrl_state = update_forward_walk_controller(
+                ctrl_state,
+                sensors,
+                dt,
+            )
+
+            foot_targets = build_foot_targets(ctrl_state)
+
+            apply_ik_control(
+                foot_targets,
+                actuator_ids,
+                ctrl_home,
+                ctrl_range,
+            )
+            print(
+                "phase:", ctrl_state["phase"],
+                "cmd:", round(sensors["cmd_vel_x"], 3),
+                round(sensors["cmd_vel_z"], 3),
+            )
 
             mujoco.mj_step(model, data)
+            v.sync()
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()
