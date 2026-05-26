@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Load the MuJoCo model from an XML file
 BASE_DIR = Path(__file__).resolve().parents[2]
-xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
+xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "a1_torque.xml"
 # A:lod model
 model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
@@ -67,12 +67,3 @@ with viewer.launch_passive(model, data) as v:
             data.ctrl[:] = ctrl_lift_fr   # 奇數秒：抬
         mujoco.mj_step(model, data)
         v.sync()
-
-
-
-# 使用 MuJoCo 的 viewer 來可視化模擬
-# with viewer.launch_passive(model, data) as v:
-#     while v.is_running():
-#         data.ctrl[:] = ctrl_des
-#         mujoco.mj_step(model, data)
-#         v.sync()

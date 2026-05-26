@@ -32,7 +32,7 @@ def compute_cop_xy(forces):
         return np.array([0.0, 0.0])  #避免除以零
     return weighted_sum / total_force
 
-def compute_target_cop_xy(swing_leg, unload_gain=0.15):
+def compute_target_cop_xy(swing_leg, unload_gain=0.03):
     """
     輸入: 擺動腳
     輸出: 目標壓力中心位置

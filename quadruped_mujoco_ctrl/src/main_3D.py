@@ -255,6 +255,7 @@ def init_walk_state():
         "ready_timer": 0.0,
 
         "debug": {},
+        "unload_start_force": None,
     }
 
     return state
@@ -290,8 +291,8 @@ def build_foot_targets(ctrl_state):
         foot_targets[leg] = target
 
     for leg in support_legs:
-        foot_targets[leg][0] += ctrl_state["body_shift"][0]
-        foot_targets[leg][1] += ctrl_state["body_shift"][1]
+        foot_targets[leg][0] -= ctrl_state["body_shift"][0]
+        foot_targets[leg][1] -= ctrl_state["body_shift"][1]
 
     return foot_targets
 
@@ -313,16 +314,23 @@ def make_walk_config():
 
         "gain": {
             "shift_alpha": 0.02,
-            "force_z": 0.0004,
-            "pre_lift": 0.002,
+            "force_z": 0.0002,
+            "pre_lift": 0.000,
+            "pre_lift_unload": 0.0012,
+
+            "cop_shift": 0.08,
+
+            "cop_sign": 1.0,
         },
 
         "limit": {
-            "pre_lift_max": 0.03,
-            "max_pre_lift_step": 0.00005,
-            "max_z_step": 0.00003,
-            "z_down": -0.004,
-            "z_up": 0.003,
+            "pre_lift_max": 0.025,
+            "max_pre_lift_step": 0.00003,
+            "max_z_step": 0.00015,
+            "z_down": -0.012,
+            "z_up": 0.004,
+
+            "body_shift": 0.025,
         },
 
         "bias": {
@@ -330,7 +338,7 @@ def make_walk_config():
                 "FR": np.array([-0.02, -0.012]),
                 "FL": np.array([-0.02, +0.012]),
                 "RR": np.array([+0.01, -0.010]),
-                "RL": np.array([+0.01, +0.010]),
+                "RL": np.array([+0.015, -0.010]),
             },
             "swing": {
                 "FR": np.array([-0.025, 0.0]),
@@ -379,6 +387,7 @@ def switch_phase(ctrl_state, new_phase):
     ctrl_state["phase"] = new_phase
     ctrl_state["phase_time"] = 0.0
     ctrl_state["ready_timer"] = 0.0
+    ctrl_state["unload_start_force"] = None
 
 def smooth_body_shift(ctrl_state, cfg):
     alpha = cfg["gain"]["shift_alpha"]
@@ -399,82 +408,7 @@ def support_is_safe(forces, support_legs, cfg):
     return True
 
 def update_forward_walk_controller(ctrl_state, sensors, dt, cfg):
-    """
-    走路控制器主函式
-    ctrl_state: 控制階段、抬腳順序、身體位移
-    sensors: 腳接觸力、cmd_vel
-    dt: 時間步長
-    """
-    ctrl_state["phase_time"] += dt
 
-    phase = ctrl_state["phase"]
-#===============================
-#   STAND
-#===============================
-    if phase == "STAND":
-        ctrl_state["target_body_shift"] = np.array([0.0, 0.0])
-        ctrl_state["body_shift"] = np.array([0.0, 0.0])
-
-        for leg in LEGS:
-                ctrl_state["z_offset"][leg] = 0.0
-                ctrl_state["pre_lift"][leg] = 0.0
-                ctrl_state["step_x"][leg] = 0.0
-
-        if cmd_active(sensors):
-                ctrl_state["swing_leg"] = GAIT_ORDER[ctrl_state["swing_index"]]
-                switch_phase(ctrl_state, "PRE_UNLOAD")
-#===============================
-#   PRE_UNLOAD
-#===============================
-    elif phase == "PRE_UNLOAD":
-        forces = sensors["forces"]
-        swing_leg = ctrl_state["swing_leg"]
-        support_legs = get_support_legs(swing_leg)
-
-        #固定卸重方向
-        ctrl_state["target_body_shift"] = cfg["bias"]["unload"][swing_leg].copy()
-
-        desired_forces, force_error, cop_error, grf_debug = compute_grf_redistribution(swing_leg, forces)
-
-        ctrl_state["debug"] = {
-            "desired_forces": desired_forces,
-            "force_error": force_error,
-            "cop_error": cop_error,
-            "measured_cop": grf_debug["measured_cop"],
-            "target_cop": grf_debug["target_cop"],
-        }
-
-        if ctrl_state["phase_time"] > cfg["timing"]["body_settle"]:
-            """
-            for 每隻支撐腳:
-            力太大還是太小
-            算出要調多少高度 dz
-            限制 dz 不要太大
-            更新這隻腳的 z_offset
-            限制總 z_offset 不要超過安全範圍
-            """
-            for leg in support_legs:
-                err = force_error[leg]
-
-                dz = -cfg["gain"]["force_z"] * err * dt
-                dz = np.clip(
-                    dz,
-                    -cfg["limit"]["max_z_step"],
-                    cfg["limit"]["max_z_step"],
-                )
-
-                ctrl_state["z_offset"][leg] += dz
-                ctrl_state["z_offset"][leg] = float(
-                    np.clip(
-                        ctrl_state["z_offset"][leg],
-                        cfg["limit"]["z_down"],
-                        cfg["limit"]["z_up"],
-                    )
-                )
-
-    smooth_body_shift(ctrl_state, cfg)
-
-    
     return ctrl_state
 
 def main():
@@ -567,46 +501,9 @@ def main():
 
     ctrl_state = init_walk_state()
     walk_cfg = make_walk_config()
-    print(ctrl_state)
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
-            dt = model.opt.timestep
-
-            rclpy.spin_once(cmd_node, timeout_sec=0.0)
-
-            sensors = read_sensors(
-                touch_pubs,
-                data,
-                fl_touch_sensor_adr,
-                fr_touch_sensor_adr,
-                rr_touch_sensor_adr,
-                rl_touch_sensor_adr,
-                cmd_node,
-            )
-
-            ctrl_state = update_forward_walk_controller(
-                ctrl_state,
-                sensors,
-                dt,
-                walk_cfg,
-            )
-
-            foot_targets = build_foot_targets(ctrl_state)
-
-            apply_ik_control(
-                foot_targets,
-                actuator_ids,
-                ctrl_home,
-                ctrl_range,
-            )
-            print(
-                "phase:", ctrl_state["phase"],
-                "cmd:", round(sensors["cmd_vel_x"], 3),
-                round(sensors["cmd_vel_z"], 3),
-            )
-
             mujoco.mj_step(model, data)
-            v.sync()
             v.sync()
         cmd_node.destroy_node()
         pub_imu_node.destroy_node()
