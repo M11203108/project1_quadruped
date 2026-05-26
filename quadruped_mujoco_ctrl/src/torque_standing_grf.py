@@ -93,6 +93,11 @@ def read_touch_forces(data, ids):
 
     return forces
 
+def read_joint_states(data, ids):
+    q = np.array([data.qpos[i] for i in ids["qpos"]])
+    qd = np.array([data.qvel[i] for i in ids["qvel"]])
+    return q, qd
+
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
     xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
