@@ -94,9 +94,29 @@ def read_touch_forces(data, ids):
     return forces
 
 def read_joint_states(data, ids):
+    """
+    q:12關節角度
+    qd:12關節速度
+    """
     q = np.array([data.qpos[i] for i in ids["qpos"]])
     qd = np.array([data.qvel[i] for i in ids["qvel"]])
     return q, qd
+
+def compute_standing_torque(data, ids, q, qd, q_des, qd_des, Kp, Kd):
+    """
+    站立控制
+    """
+    tau_pd = Kp * (q_des - q) + Kd * (qd_des - qd)
+    tau_bias = np.array([data.qfrc_bias[i] for i in ids["qvel"]])
+    tau = tau_bias + tau_pd
+    return tau
+
+def write_torque(data, ids, tau, tau_limit=33.5):
+
+    tau = np.clip(tau, -tau_limit, tau_limit)
+    for i, actuator_id in enumerate(ids["actuator"]):
+        data.ctrl[actuator_id] = tau[i]
+    return tau
 
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
