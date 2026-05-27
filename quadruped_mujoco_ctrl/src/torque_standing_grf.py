@@ -118,6 +118,66 @@ def write_torque(data, ids, tau, tau_limit=33.5):
         data.ctrl[actuator_id] = tau[i]
     return tau
 
+def compute_desired_grf(forces, mode="shift_to_FR"):
+    """
+    forces:
+        measured touch forces
+    return:
+        desired_forces
+    """
+    total_force = 0.0
+    for leg in LEGS:
+        total_force += max(float(forces[leg]), 0.0)
+    if total_force < 1e-6:
+        total_force = 120.0
+    average_force = total_force / 4.0
+    desired_forces = {
+        leg: average_force
+        for leg in LEGS
+    }
+
+    if mode == "shift_to_FR":
+        delta = 8.0
+
+        desired_forces["FR"] += delta
+        desired_forces["RL"] -= delta
+
+    return desired_forces 
+
+def compute_force_error(desired_forces, measured_forces):
+    """
+    計算 GRF 誤差
+    """
+    force_error = {}
+    for leg in LEGS:
+        desired = float(desired_forces[leg])
+        measured = float(measured_forces[leg])
+        force_error[leg] = desired - measured
+
+    return force_error
+
+def compute_foot_force_commands(force_error, Kf=0.6, force_limit=15.0, force_sign=1.0):
+    """
+    根據 GRF 誤差計算 foot force commands
+    """
+    foot_force_cmds={}
+    for leg in LEGS:
+        fz_cmd = Kf * force_error[leg]
+
+        fz_cmd = np.clip(
+            fz_cmd,
+            -force_limit,
+            force_limit,
+        )
+
+        foot_force_cmds[leg] = np.array([
+            0.0,
+            0.0,
+            force_sign * fz_cmd,
+        ])
+
+    return foot_force_cmds
+
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
     xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
@@ -190,11 +250,29 @@ def main():
 
             # 10. 讀四腳 touch force
             forces = read_touch_forces(data, ids)
+            desired_forces = compute_desired_grf(
+                forces,
+                mode="shift_to_FR",
+            )
+
+            force_error = compute_force_error(
+                desired_forces,
+                forces,
+            )
+            foot_force_cmds = compute_foot_force_commands(
+                force_error,
+                Kf=0.6,
+                force_limit=15.0,
+                force_sign=1.0,
+            )
 
             if step % 100 == 0:
                 print(
                     "z:", round(data.qpos[2], 3),
-                    "forces:", {leg: round(force, 1) for leg, force in forces.items()},
+                    "measured:", {leg: round(force, 1) for leg, force in forces.items()},
+                    "desired:", {leg: round(force, 1) for leg, force in desired_forces.items()},
+                    "error:", {leg: round(err, 1) for leg, err in force_error.items()},
+                    "Fz_cmd:", {leg: round(float(cmd[2]), 2) for leg, cmd in foot_force_cmds.items()},
                     "max_tau:", round(float(np.max(np.abs(tau))), 2),
                 )
 
