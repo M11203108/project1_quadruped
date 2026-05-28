@@ -2,21 +2,15 @@ import numpy as np
 
 LEGS = ["FR", "FL", "RR", "RL"]
 
-FOOT_XY_BODY = {
-    "FR": np.array([+0.183, -0.132]),
-    "FL": np.array([+0.183, +0.132]),
-    "RR": np.array([-0.183, -0.132]),
-    "RL": np.array([-0.183, +0.132]),
-}
 
 def get_support_legs(swing_leg):
     support_legs = []
     for leg in LEGS:
         if leg != swing_leg:
-            support_legs.append(leg)
+            support_legs.append(leg)    
     return support_legs
 
-def compute_cop_xy(forces):
+def compute_cop_xy(forces, foot_xy_body):
     """
     輸入:每支腳的回傳力
     輸出:壓力中心位置
@@ -26,13 +20,13 @@ def compute_cop_xy(forces):
     for leg in LEGS:
         force = max(float(forces.get(leg, 0.0)), 0.0)  #每腳的回傳力 確保是正的
         total_force += force
-        weighted_sum += force*FOOT_XY_BODY[leg]
+        weighted_sum += force*foot_xy_body[leg]
     
     if total_force < 1e-6:
         return np.array([0.0, 0.0])  #避免除以零
     return weighted_sum / total_force
 
-def compute_target_cop_xy(swing_leg, unload_gain=0.03):
+def compute_target_cop_xy(swing_leg, foot_xy_body, unload_gain=0.03):
     """
     輸入: 擺動腳
     輸出: 目標壓力中心位置
@@ -41,15 +35,15 @@ def compute_target_cop_xy(swing_leg, unload_gain=0.03):
 
     support_points = []
     for leg in support_legs:
-        support_points.append(FOOT_XY_BODY[leg])
+        support_points.append(foot_xy_body[leg])
     support_points = np.array(support_points)
     support_center = np.mean(support_points, axis=0) #mean 矩陣平均
-    swing_point = FOOT_XY_BODY[swing_leg]
+    swing_point = foot_xy_body[swing_leg]
     away_vec = support_center - swing_point
     target_cop = support_center + unload_gain*away_vec
     return target_cop
 
-def solve_desired_grf(swing_leg, forces):
+def solve_desired_grf(swing_leg, forces, foot_xy_body):
     """
     卸重支撐腳的支撐力
     """
@@ -58,10 +52,13 @@ def solve_desired_grf(swing_leg, forces):
     for leg in LEGS:
         W += max(float(forces.get(leg, 0.0)), 0.0)
 
-    target_cop = compute_target_cop_xy(swing_leg)
+    if W < 1e-6:
+        W = 120.0
+
+    target_cop = compute_target_cop_xy(swing_leg, foot_xy_body)
     support_points = []
     for leg in support_legs:
-        support_points.append(FOOT_XY_BODY[leg])
+        support_points.append(foot_xy_body[leg])
     support_points = np.array(support_points)
     A = np.array([
         [1.0, 1.0, 1.0],
@@ -75,7 +72,10 @@ def solve_desired_grf(swing_leg, forces):
         W * target_cop[1],
     ])
 
-    f_support = np.linalg.solve(A, b)
+    try:
+        f_support = np.linalg.solve(A, b)
+    except np.linalg.LinAlgError:
+        f_support = np.ones(3) * (W / 3.0)
     f_min = 5.0
     f_max = 70.0
 
@@ -91,7 +91,7 @@ def solve_desired_grf(swing_leg, forces):
 
     desired_forces[swing_leg] = 0.0
 
-    measured_cop = compute_cop_xy(forces)
+    measured_cop = compute_cop_xy(forces, foot_xy_body)
     debug_info = {
         "support_legs": support_legs,
         "W": W,
@@ -115,16 +115,16 @@ def compute_force_error(desired_forces, forces):
 
     return force_error
 
-def compute_cop_error(swing_leg, forces):
-    target = compute_target_cop_xy(swing_leg)
-    measured = compute_cop_xy(forces)
+def compute_cop_error(swing_leg, forces, foot_xy_body):
+    target = compute_target_cop_xy(swing_leg, foot_xy_body)
+    measured = compute_cop_xy(forces, foot_xy_body)
     cop_error = target - measured
     return cop_error
 
-def compute_grf_redistribution(swing_leg, forces):
-    desired_forces, debug_info = solve_desired_grf(swing_leg, forces)
+def compute_grf_redistribution(swing_leg, forces, foot_xy_body):
+    desired_forces, debug_info = solve_desired_grf(swing_leg, forces, foot_xy_body)
     force_error = compute_force_error(desired_forces, forces)
-    cop_error = compute_cop_error(swing_leg, forces)
+    cop_error = compute_cop_error(swing_leg, forces, foot_xy_body)
 
     debug_info["force_error"] = force_error
     debug_info["cop_error"] = cop_error
@@ -133,15 +133,24 @@ def compute_grf_redistribution(swing_leg, forces):
 
 if __name__ == "__main__":
     forces = {
-        "FR": 10.0,
-        "FL": 10.0,
-        "RR": 10.0,
-        "RL": 10.0,
+        "FR": 27.0,
+        "FL": 28.0,
+        "RR": 33.0,
+        "RL": 34.0,
     }
+
+    foot_xy_body = {
+        "FR": np.array([0.191, -0.134]),
+        "FL": np.array([0.191,  0.134]),
+        "RR": np.array([-0.175, -0.134]),
+        "RL": np.array([-0.175,  0.133]),
+    }
+
     for swing_leg in LEGS:
         desired_forces, force_error, cop_error, debug = compute_grf_redistribution(
             swing_leg,
-            forces
+            forces,
+            foot_xy_body,
         )
 
         print("\n====================")

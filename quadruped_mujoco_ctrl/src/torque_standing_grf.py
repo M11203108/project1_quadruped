@@ -2,6 +2,8 @@ import mujoco
 import numpy as np
 from mujoco import viewer
 from pathlib import Path
+from grf_redistributor import compute_grf_redistribution as compute_cop_grf_redistribution
+from kinematics import backward_kinematics_3d
 
 LEGS = ["FR", "FL", "RR", "RL"]
 
@@ -31,6 +33,13 @@ SITE_NAMES = {
     "FL": "fl_touch_site",
     "RR": "rr_touch_site",
     "RL": "rl_touch_site",
+}
+
+LEG_SIDE_SIGN = {
+    "FR": -1.0,
+    "RR": -1.0,
+    "FL":  1.0,
+    "RL":  1.0,
 }
 
 def must_find_id(model, obj_type, name):
@@ -93,6 +102,155 @@ def read_touch_forces(data, ids):
 
     return forces
 
+def get_foot_xy_body(model, data, ids):
+    """
+    取得四隻腳 foot site 在 body/trunk frame 下的 xy 位置。
+
+    return:
+        foot_xy_body = {
+            "FR": np.array([x, y]),
+            "FL": np.array([x, y]),
+            "RR": np.array([x, y]),
+            "RL": np.array([x, y]),
+        }
+    """
+    trunk_id = must_find_id(
+        model,
+        mujoco.mjtObj.mjOBJ_BODY,
+        "trunk",
+    )
+
+    trunk_pos_world = data.xpos[trunk_id].copy()
+    trunk_rot_world = data.xmat[trunk_id].reshape(3, 3).copy()
+
+    foot_xy_body = {}
+
+    for leg in LEGS:
+        site_id = ids["site"][leg]
+
+        foot_pos_world = data.site_xpos[site_id].copy()
+
+        foot_pos_body = trunk_rot_world.T @ (
+            foot_pos_world - trunk_pos_world
+        )
+
+        foot_xy_body[leg] = foot_pos_body[:2].copy()
+
+    return foot_xy_body
+
+def get_foot_xyz_body(model, data, ids):
+    trunk_id = must_find_id(
+        model,
+        mujoco.mjtObj.mjOBJ_BODY,
+        "trunk",
+    )
+
+    trunk_pos_world = data.xpos[trunk_id].copy()
+    trunk_rot_world = data.xmat[trunk_id].reshape(3, 3).copy()
+
+    foot_xyz_body = {}
+
+    for leg in LEGS:
+        site_id = ids["site"][leg]
+
+        foot_pos_world = data.site_xpos[site_id].copy()
+
+        foot_pos_body = trunk_rot_world.T @ (
+            foot_pos_world - trunk_pos_world
+        )
+
+        foot_xyz_body[leg] = foot_pos_body.copy()
+
+    return foot_xyz_body
+
+def leg_ik_3d(leg, foot_target_body, hip_body, h, hu, hl):
+    """
+    foot target 從 body frame 轉成 leg/hip frame
+    關節角度
+    """
+
+    foot_target_body = np.asarray(foot_target_body, dtype=float)
+    hip_body = np.asarray(hip_body, dtype=float)
+    # body frame → 單腳 hip frame
+    foot_target_leg = foot_target_body - hip_body
+
+    side_angle = LEG_SIDE_SIGN[leg]
+
+    abd, hip, knee = backward_kinematics_3d(
+        foot_target_leg[0],
+        foot_target_leg[1],
+        foot_target_leg[2],
+        h,
+        hu,
+        hl,
+        side_angle=side_angle,
+    )
+
+    return np.array([abd, hip, knee], dtype=float)
+
+def foot_targets_to_q_des(foot_targets_body, hip_xyz_body, h, hu, hl):
+    """
+    foot target 轉 12 維 q_des
+    """
+
+    q_des_list = []
+
+    for leg in LEGS:
+        q_leg = leg_ik_3d(
+            leg,
+            foot_targets_body[leg],
+            hip_xyz_body[leg],
+            h,
+            hu,
+            hl,
+        )
+
+        q_des_list.extend(q_leg)
+
+    q_des = np.array(q_des_list, dtype=float)
+
+    if q_des.shape != (12,):
+        raise RuntimeError(f"q_des shape 錯誤，目前是 {q_des.shape}")
+
+    return q_des
+
+def get_hip_xyz_body(model, data):
+    """
+    取得四隻腳 hip joint anchor 在 body/trunk frame 下的 xyz 位置
+    """
+
+    trunk_id = must_find_id(
+        model,
+        mujoco.mjtObj.mjOBJ_BODY,
+        "trunk",
+    )
+
+    trunk_pos_world = data.xpos[trunk_id].copy()
+    trunk_rot_world = data.xmat[trunk_id].reshape(3, 3).copy()
+
+    hip_xyz_body = {}
+
+    for leg in LEGS:
+        hip_joint_name = f"{leg}_hip_joint"
+
+        hip_joint_id = must_find_id(
+            model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            hip_joint_name,
+        )
+
+        # MuJoCo 會把 joint anchor 的世界座標存在 data.xanchor
+        hip_pos_world = data.xanchor[hip_joint_id].copy()
+
+        # world frame → trunk/body frame
+        hip_pos_body = trunk_rot_world.T @ (
+            hip_pos_world - trunk_pos_world
+        )
+
+        hip_xyz_body[leg] = hip_pos_body.copy()
+
+    return hip_xyz_body
+
 def read_joint_states(data, ids):
     """
     q:12關節角度
@@ -137,7 +295,7 @@ def compute_desired_grf(forces, mode="shift_to_FR"):
     }
 
     if mode == "shift_to_FR":
-        delta = 8.0
+        delta = 15.0
 
         desired_forces["FR"] += delta
         desired_forces["RL"] -= delta
@@ -156,26 +314,31 @@ def compute_force_error(desired_forces, measured_forces):
 
     return force_error
 
-def compute_foot_force_commands(force_error, Kf=0.6, force_limit=15.0, force_sign=1.0):
+def compute_foot_force_commands(force_error, Kf=0.6, force_limit=25.0, force_sign=1.0, support_legs=None):
     """
     根據 GRF 誤差計算 foot force commands
     """
     foot_force_cmds={}
     for leg in LEGS:
-        fz_cmd = Kf * force_error[leg]
+        if support_legs is not None and leg not in support_legs:
+            fz_cmd = 0.0
+        else:
+            fz_cmd = Kf * force_error[leg]
 
-        fz_cmd = np.clip(
-            fz_cmd,
-            -force_limit,
-            force_limit,
-        )
+            # 第一版先不允許負的垂直力
+            fz_cmd = max(fz_cmd, 0.0)
+
+            fz_cmd = np.clip(
+                fz_cmd,
+                0.0,
+                force_limit,
+            )
 
         foot_force_cmds[leg] = np.array([
             0.0,
             0.0,
             force_sign * fz_cmd,
         ])
-
     return foot_force_cmds
 
 def leg_jtf_torque(model, data, leg, ids, f_world):
@@ -211,6 +374,54 @@ def leg_jtf_torque(model, data, leg, ids, f_world):
 
     return tau_leg
 
+def compute_grf_torque(model, data, ids, foot_force_cmds):
+    """
+    leg_jtf 套用到四肢腳
+    """
+    tau_grf = np.zeros(12)
+    for leg in LEGS:
+        f_world = foot_force_cmds[leg]
+        tau_leg = leg_jtf_torque(
+            model,
+            data,
+            leg,
+            ids,
+            f_world,
+        )
+
+        leg_index = LEGS.index(leg)
+        leg_start = leg_index * 3
+        tau_grf[leg_start:leg_start + 3] = tau_leg
+
+    return tau_grf
+
+def scale_leg_torque(tau, leg, scale):
+    """
+    torque 乘上一個比例
+    """
+    tau_scaled = tau.copy()
+
+    leg_index = LEGS.index(leg)
+    leg_start = leg_index * 3
+
+    tau_scaled[leg_start:leg_start + 3] *= scale
+
+    return tau_scaled
+
+def compute_body_shift_from_cop_error(cop_error, gain=0.2, max_shift=0.025):
+    """
+  CoP error 轉 body xy shift command
+    """
+    body_shift = gain * cop_error
+
+    body_shift = np.clip(
+        body_shift,
+        -max_shift,
+        max_shift,
+    )
+
+    return body_shift
+
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
     xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
@@ -220,18 +431,8 @@ def main():
     model = mujoco.MjModel.from_xml_path(str(xml))
     data = mujoco.MjData(model)
 
-    print("model.nq =", model.nq)
-    print("model.nv =", model.nv)
-    print("model.nu =", model.nu)
 
     ids = get_ids(model)
-
-    print("\n=== ids 檢查 ===")
-    print("qpos ids:", ids["qpos"])
-    print("qvel ids:", ids["qvel"])
-    print("actuator ids:", ids["actuator"])
-    print("site ids:", ids["site"])
-    print("touch adrs:", ids["touch_adr"])
 
     # 1. reset 到 home pose
     key_name = "home"
@@ -254,8 +455,12 @@ def main():
     # 3. torque PD 參數
     Kp = 100.0
     Kd = 3.0
-    tau_limit = 33.5
 
+    Kf = 0.8
+    force_limit = 25.0
+    force_sign = 1.0
+
+    tau_limit = 33.5
     step = 0
 
     # 4. 開啟 MuJoCo viewer
@@ -263,50 +468,23 @@ def main():
         while v.is_running():
             mujoco.mj_forward(model, data)
 
-            # 5. 讀目前關節角與關節速度
-            q = np.array([data.qpos[i] for i in ids["qpos"]])
-            qd = np.array([data.qvel[i] for i in ids["qvel"]])
-
-            # 6. joint PD torque
-            tau_pd = Kp * (q_des - q) + Kd * (qd_des - qd)
-
-            # 7. bias / gravity compensation
-            tau_bias = np.array([data.qfrc_bias[i] for i in ids["qvel"]])
-
-            # 8. 合成 torque
-            tau = tau_bias + tau_pd
-            tau = np.clip(tau, -tau_limit, tau_limit)
-
-            # 9. 寫入 motor actuator
-            for i, actuator_id in enumerate(ids["actuator"]):
-                data.ctrl[actuator_id] = tau[i]
-
-            # 10. 讀四腳 touch force
-            forces = read_touch_forces(data, ids)
-            desired_forces = compute_desired_grf(
-                forces,
-                mode="shift_to_FR",
-            )
-
-            force_error = compute_force_error(
-                desired_forces,
-                forces,
-            )
-            foot_force_cmds = compute_foot_force_commands(
-                force_error,
-                Kf=0.6,
-                force_limit=15.0,
-                force_sign=1.0,
-            )
-
             if step % 100 == 0:
                 print(
+                    "step:", step,
                     "z:", round(data.qpos[2], 3),
                     "measured:", {leg: round(force, 1) for leg, force in forces.items()},
                     "desired:", {leg: round(force, 1) for leg, force in desired_forces.items()},
                     "error:", {leg: round(err, 1) for leg, err in force_error.items()},
                     "Fz_cmd:", {leg: round(float(cmd[2]), 2) for leg, cmd in foot_force_cmds.items()},
-                    "max_tau:", round(float(np.max(np.abs(tau))), 2),
+                    "max_tau_grf:", round(float(np.max(np.abs(tau_grf))), 2),
+                    "max_tau:", round(float(np.max(np.abs(tau_total))), 2),
+                    "cop:", np.round(grf_debug["measured_cop"], 3).tolist(),
+                    "target_cop:", np.round(grf_debug["target_cop"], 3).tolist(),
+                    "cop_error:", np.round(cop_error, 3).tolist(),
+                    "swing_scale:", round(swing_scale, 2),
+                    "cop_err_norm:", round(float(cop_error_norm), 3),
+                    "body_shift_cmd:", np.round(body_shift_cmd, 3).tolist(),
+
                 )
 
             mujoco.mj_step(model, data)
