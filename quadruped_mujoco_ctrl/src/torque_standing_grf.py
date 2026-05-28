@@ -178,6 +178,39 @@ def compute_foot_force_commands(force_error, Kf=0.6, force_limit=15.0, force_sig
 
     return foot_force_cmds
 
+def leg_jtf_torque(model, data, leg, ids, f_world):
+    """
+    Jacobian 某腳的足端力轉成三個關節 torque
+
+    f_world:
+        世界座標的足端力np.array([0.0, 0.0, 5.0])
+
+    return:
+        tau_leg: 3 維 torque
+    """
+    jacp = np.zeros((3, model.nv)) #position
+    jacr = np.zeros((3, model.nv)) #rotation
+    site_id = ids["site"][leg]
+
+    #mujoco jacobian
+    mujoco.mj_jacSite(
+        model,
+        data,
+        jacp,
+        jacr,
+        site_id,
+    )
+    #找出leg的關節
+    leg_index = LEGS.index(leg)
+    leg_start = leg_index * 3
+    leg_dofs = ids["qvel"][leg_start:leg_start + 3]
+
+    J_leg = jacp[:, leg_dofs]
+
+    tau_leg = J_leg.T @ f_world
+
+    return tau_leg
+
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
     xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
