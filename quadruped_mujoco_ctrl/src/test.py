@@ -4,7 +4,7 @@ from mujoco import viewer
 from pathlib import Path
 
 from robot_interface import RobotInterface, LEGS
-
+from ik_controller import IKController
 
 def reset_to_home(robot):
     key_id = mujoco.mj_name2id(
@@ -56,23 +56,41 @@ def main():
 
     # reset 到 home 後，讀目前 12 維關節角，當作站立目標
     state = robot.read_state()
-    q_des = state.q.copy()
+    q_des_home = state.q.copy()
 
     step_count = 0
+
+    ik = IKController(
+    h=0.08505,
+    hu=0.2,
+    hl=0.2,
+    )
 
     with viewer.launch_passive(robot.model, robot.data) as v:
         while v.is_running():
             state = robot.read_state()
 
+            # 1. PD 繼續追 home 姿態
             tau = compute_pd_hold_torque(
                 robot=robot,
                 state=state,
-                q_des=q_des,
+                q_des=q_des_home,
                 Kp=60.0,
                 Kd=2.0,
             )
 
             tau_safe = robot.write_torque(tau)
+
+            # 2. IK 只做測試，不拿來控制
+            foot_targets_body = state.foot_xyz_body.copy()
+
+            q_des_ik = ik.solve(
+                foot_targets_body=foot_targets_body,
+                hip_xyz_body=state.hip_xyz_body,
+            )
+
+            ik_err = np.max(np.abs(q_des_ik - state.q))
+            home_err = np.max(np.abs(q_des_home - state.q))
 
             robot.step()
             v.sync()
@@ -86,16 +104,13 @@ def main():
                 }
 
                 print(
-                    "step:",
-                    step_count,
-                    "trunk_z:",
-                    round(state.trunk_pos_world[2], 3),
-                    "forces:",
-                    forces_str,
-                    "max_tau:",
-                    round(np.max(np.abs(tau_safe)), 2),
-                    "max_q_err:",
-                    round(np.max(np.abs(q_des - state.q)), 3),
+                    "step:", step_count,
+                    "trunk_z:", round(state.trunk_pos_world[2], 3),
+                    "forces:", forces_str,
+                    "max_tau:", round(np.max(np.abs(tau_safe)), 2),
+                    "home_err:", round(home_err, 3),
+                    "ik_err:", round(ik_err, 3),
+                    "q_des_ik_shape:", q_des_ik.shape,
                 )
 
             step_count += 1

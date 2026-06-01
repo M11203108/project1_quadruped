@@ -69,22 +69,28 @@ class RobotInterface:
             self.model,
             self.data,
         )
-        
+
         foot_xy_body = get_foot_xy_body(
             self.model,
             self.data,
             self.ids,
+            trunk_pos_world,
+            trunk_rot_world,
         )
 
         foot_xyz_body = get_foot_xyz_body(
             self.model,
             self.data,
             self.ids,
+            trunk_pos_world,
+            trunk_rot_world,
         )
 
         hip_xyz_body = get_hip_xyz_body(
             self.model,
             self.data,
+            trunk_pos_world,
+            trunk_rot_world,
         )
 
 
