@@ -2,7 +2,6 @@ import mujoco
 import numpy as np
 from mujoco import viewer
 from pathlib import Path
-from grf_redistributor import compute_grf_redistribution as compute_cop_grf_redistribution
 from kinematics import backward_kinematics_3d
 
 LEGS = ["FR", "FL", "RR", "RL"]
@@ -374,26 +373,6 @@ def leg_jtf_torque(model, data, leg, ids, f_world):
 
     return tau_leg
 
-def compute_grf_torque(model, data, ids, foot_force_cmds):
-    """
-    leg_jtf 套用到四肢腳
-    """
-    tau_grf = np.zeros(12)
-    for leg in LEGS:
-        f_world = foot_force_cmds[leg]
-        tau_leg = leg_jtf_torque(
-            model,
-            data,
-            leg,
-            ids,
-            f_world,
-        )
-
-        leg_index = LEGS.index(leg)
-        leg_start = leg_index * 3
-        tau_grf[leg_start:leg_start + 3] = tau_leg
-
-    return tau_grf
 
 def scale_leg_torque(tau, leg, scale):
     """
@@ -408,84 +387,78 @@ def scale_leg_torque(tau, leg, scale):
 
     return tau_scaled
 
-def compute_body_shift_from_cop_error(cop_error, gain=0.2, max_shift=0.025):
+def smooth_q_des(q_des, q_des_raw, alpha=0.05):
     """
-  CoP error 轉 body xy shift command
+    讓 q_des 慢慢接近 q_des_raw，避免 torque PD 突然跳太大。
     """
-    body_shift = gain * cop_error
+    return q_des + alpha * (q_des_raw - q_des)
 
-    body_shift = np.clip(
-        body_shift,
-        -max_shift,
-        max_shift,
-    )
+def update_z_offset_from_force_error(
+    z_offset,
+    desired_forces,
+    measured_forces,
+    swing_leg,
+    support_legs,
+):
+    """
+    desired GRF 和 measured GRF 自動更新 z_offset。
 
-    return body_shift
+    """
+
+    new_z_offset = z_offset.copy()
+
+    # 每次更新最大變化量，避免突然跳太大
+    max_step = 0.00004
+
+    # z offset 限制
+    z_up_limit = 0.010      # 腳最多往上收 10 mm
+    z_down_limit = -0.006   # 支撐腳最多往下踩 6 mm
+
+    # 1. swing leg 卸重
+    swing_measured = measured_forces[swing_leg]
+    swing_desired = desired_forces.get(swing_leg, 0.0)
+
+    swing_error = swing_measured - swing_desired
+
+    if swing_error > 0.0:
+        dz = 0.000002 * swing_error
+        dz = np.clip(dz, 0.0, max_step)
+        new_z_offset[swing_leg] += dz
+
+    # 2. support legs 補支撐
+    for leg in support_legs:
+        desired = desired_forces[leg]
+        measured = measured_forces[leg]
+
+        support_error = desired - measured
+
+        if support_error > 0.0:
+            dz = -0.000002 * support_error
+            dz = np.clip(dz, -max_step, 0.0)
+            new_z_offset[leg] += dz
+
+    # 3. 限制 z_offset 範圍
+    for leg in LEGS:
+        new_z_offset[leg] = float(
+            np.clip(
+                new_z_offset[leg],
+                z_down_limit,
+                z_up_limit,
+            )
+        )
+
+    return new_z_offset
 
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
     xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
 
-    print("XML path:", xml)
-
     model = mujoco.MjModel.from_xml_path(str(xml))
     data = mujoco.MjData(model)
 
-
-    ids = get_ids(model)
-
-    # 1. reset 到 home pose
-    key_name = "home"
-    key_id = mujoco.mj_name2id(
-        model,
-        mujoco.mjtObj.mjOBJ_KEY,
-        key_name,
-    )
-
-    if key_id < 0:
-        raise RuntimeError("找不到 home keyframe")
-
-    mujoco.mj_resetDataKeyframe(model, data, key_id)
-    mujoco.mj_forward(model, data)
-
-    # 2. 設定 home pose 為站立目標
-    q_des = np.array([data.qpos[i] for i in ids["qpos"]])
-    qd_des = np.zeros(12)
-
-    # 3. torque PD 參數
-    Kp = 100.0
-    Kd = 3.0
-
-    Kf = 0.8
-    force_limit = 25.0
-    force_sign = 1.0
-
-    tau_limit = 33.5
-    step = 0
-
-    # 4. 開啟 MuJoCo viewer
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
             mujoco.mj_forward(model, data)
-
-            if step % 100 == 0:
-                print(
-                    "step:", step,
-                    "z:", round(data.qpos[2], 3),
-                    "measured:", {leg: round(force, 1) for leg, force in forces.items()},
-                    "desired:", {leg: round(force, 1) for leg, force in desired_forces.items()},
-                    "error:", {leg: round(err, 1) for leg, err in force_error.items()},
-                    "Fz_cmd:", {leg: round(float(cmd[2]), 2) for leg, cmd in foot_force_cmds.items()},
-                    "max_tau_grf:", round(float(np.max(np.abs(tau_grf))), 2),
-                    "max_tau:", round(float(np.max(np.abs(tau_total))), 2),
-                    "cop:", np.round(grf_debug["measured_cop"], 3).tolist(),
-                    "target_cop:", np.round(grf_debug["target_cop"], 3).tolist(),
-                    "cop_error:", np.round(cop_error, 3).tolist(),
-                    "swing_scale:", round(swing_scale, 2),
-                    "cop_err_norm:", round(float(cop_error_norm), 3),
-                    "body_shift_cmd:", np.round(body_shift_cmd, 3).tolist(),
-
-                )
 
             mujoco.mj_step(model, data)
             v.sync()

@@ -131,6 +131,54 @@ def compute_grf_redistribution(swing_leg, forces, foot_xy_body):
 
     return desired_forces, force_error, cop_error, debug_info
 
+def compute_body_shift_target_from_support(
+    swing_leg,
+    foot_home_body,
+    shift_ratio=0.08,
+    max_shift_x=0.025,
+    max_shift_y=0.018,):
+    """
+    swing leg 支撐腳幾何
+    計算 body_shift_target
+    """
+
+    support_legs = get_support_legs(swing_leg)
+
+    support_points = np.array([
+        foot_home_body[leg][:2]
+        for leg in support_legs
+    ])
+
+    swing_point = foot_home_body[swing_leg][:2]
+
+    support_center = np.mean(support_points, axis=0)
+
+    # 從 swing leg 指向支撐三角形中心
+    away_vec = support_center - swing_point
+
+    body_shift_target = shift_ratio * away_vec
+
+    body_shift_target[0] = np.clip(
+        body_shift_target[0],
+        -max_shift_x,
+        max_shift_x,
+    )
+
+    body_shift_target[1] = np.clip(
+        body_shift_target[1],
+        -max_shift_y,
+        max_shift_y,
+    )
+
+    debug_info = {
+        "support_legs": support_legs,
+        "support_center": support_center,
+        "swing_point": swing_point,
+        "away_vec": away_vec,
+    }
+
+    return body_shift_target, debug_info
+
 if __name__ == "__main__":
     forces = {
         "FR": 27.0,
