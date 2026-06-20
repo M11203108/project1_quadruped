@@ -1,8 +1,10 @@
+import json
+
 import mujoco
 import numpy as np
 from mujoco import viewer
 from pathlib import Path
-from kinematics import backward_kinematics_3d
+from grf_redistributor import compute_grf_redistribution as compute_cop_grf_redistribution
 
 LEGS = ["FR", "FL", "RR", "RL"]
 
@@ -32,13 +34,6 @@ SITE_NAMES = {
     "FL": "fl_touch_site",
     "RR": "rr_touch_site",
     "RL": "rl_touch_site",
-}
-
-LEG_SIDE_SIGN = {
-    "FR": -1.0,
-    "RR": -1.0,
-    "FL":  1.0,
-    "RL":  1.0,
 }
 
 def must_find_id(model, obj_type, name):
@@ -137,118 +132,212 @@ def get_foot_xy_body(model, data, ids):
 
     return foot_xy_body
 
-def get_foot_xyz_body(model, data, ids):
-    trunk_id = must_find_id(
-        model,
-        mujoco.mjtObj.mjOBJ_BODY,
-        "trunk",
-    )
 
+def np_round_list(x, ndigits=6):
+    return np.round(np.asarray(x, dtype=float), ndigits).tolist()
+
+
+def np_round_dict(d, ndigits=6):
+    return {k: np_round_list(v, ndigits) for k, v in d.items()}
+
+
+def get_trunk_frame(model, data):
+    trunk_id = must_find_id(model, mujoco.mjtObj.mjOBJ_BODY, "trunk")
     trunk_pos_world = data.xpos[trunk_id].copy()
     trunk_rot_world = data.xmat[trunk_id].reshape(3, 3).copy()
+    return trunk_id, trunk_pos_world, trunk_rot_world
 
+
+def world_to_body(data, body_id, p_world):
+    body_pos_world = data.xpos[body_id].copy()
+    body_rot_world = data.xmat[body_id].reshape(3, 3).copy()
+    return body_rot_world.T @ (np.asarray(p_world, dtype=float) - body_pos_world)
+
+
+def get_foot_xyz_body(model, data, ids):
+    trunk_id, trunk_pos_world, trunk_rot_world = get_trunk_frame(model, data)
     foot_xyz_body = {}
 
     for leg in LEGS:
         site_id = ids["site"][leg]
-
         foot_pos_world = data.site_xpos[site_id].copy()
-
-        foot_pos_body = trunk_rot_world.T @ (
-            foot_pos_world - trunk_pos_world
-        )
-
-        foot_xyz_body[leg] = foot_pos_body.copy()
+        foot_xyz_body[leg] = trunk_rot_world.T @ (foot_pos_world - trunk_pos_world)
 
     return foot_xyz_body
 
-def leg_ik_3d(leg, foot_target_body, hip_body, h, hu, hl):
-    """
-    foot target 從 body frame 轉成 leg/hip frame
-    關節角度
-    """
-
-    foot_target_body = np.asarray(foot_target_body, dtype=float)
-    hip_body = np.asarray(hip_body, dtype=float)
-    # body frame → 單腳 hip frame
-    foot_target_leg = foot_target_body - hip_body
-
-    side_angle = LEG_SIDE_SIGN[leg]
-
-    abd, hip, knee = backward_kinematics_3d(
-        foot_target_leg[0],
-        foot_target_leg[1],
-        foot_target_leg[2],
-        h,
-        hu,
-        hl,
-        side_angle=side_angle,
-    )
-
-    return np.array([abd, hip, knee], dtype=float)
-
-def foot_targets_to_q_des(foot_targets_body, hip_xyz_body, h, hu, hl):
-    """
-    foot target 轉 12 維 q_des
-    """
-
-    q_des_list = []
-
-    for leg in LEGS:
-        q_leg = leg_ik_3d(
-            leg,
-            foot_targets_body[leg],
-            hip_xyz_body[leg],
-            h,
-            hu,
-            hl,
-        )
-
-        q_des_list.extend(q_leg)
-
-    q_des = np.array(q_des_list, dtype=float)
-
-    if q_des.shape != (12,):
-        raise RuntimeError(f"q_des shape 錯誤，目前是 {q_des.shape}")
-
-    return q_des
 
 def get_hip_xyz_body(model, data):
-    """
-    取得四隻腳 hip joint anchor 在 body/trunk frame 下的 xyz 位置
-    """
-
-    trunk_id = must_find_id(
-        model,
-        mujoco.mjtObj.mjOBJ_BODY,
-        "trunk",
-    )
-
-    trunk_pos_world = data.xpos[trunk_id].copy()
-    trunk_rot_world = data.xmat[trunk_id].reshape(3, 3).copy()
-
+    trunk_id, trunk_pos_world, trunk_rot_world = get_trunk_frame(model, data)
     hip_xyz_body = {}
 
     for leg in LEGS:
-        hip_joint_name = f"{leg}_hip_joint"
-
-        hip_joint_id = must_find_id(
-            model,
-            mujoco.mjtObj.mjOBJ_JOINT,
-            hip_joint_name,
-        )
-
-        # MuJoCo 會把 joint anchor 的世界座標存在 data.xanchor
-        hip_pos_world = data.xanchor[hip_joint_id].copy()
-
-        # world frame → trunk/body frame
-        hip_pos_body = trunk_rot_world.T @ (
-            hip_pos_world - trunk_pos_world
-        )
-
-        hip_xyz_body[leg] = hip_pos_body.copy()
+        hip_id = must_find_id(model, mujoco.mjtObj.mjOBJ_BODY, f"{leg}_hip")
+        hip_pos_world = data.xpos[hip_id].copy()
+        hip_xyz_body[leg] = trunk_rot_world.T @ (hip_pos_world - trunk_pos_world)
 
     return hip_xyz_body
+
+
+def get_com_info(model, data):
+    trunk_id, trunk_pos_world, trunk_rot_world = get_trunk_frame(model, data)
+    com_world = data.subtree_com[trunk_id].copy()
+    com_from_trunk_body = trunk_rot_world.T @ (com_world - trunk_pos_world)
+    return com_world, com_from_trunk_body
+
+
+def get_joint_info_dict(model, data, ids):
+    q, qd = read_joint_states(data, ids)
+    joint_info = {}
+
+    for i, name in enumerate(JOINT_NAMES):
+        joint_id = must_find_id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        joint_info[name] = {
+            "qposadr": int(ids["qpos"][i]),
+            "qveladr": int(ids["qvel"][i]),
+            "q": float(q[i]),
+            "qd": float(qd[i]),
+            "range": np_round_list(model.jnt_range[joint_id]),
+        }
+
+    return joint_info
+
+
+def torque_array_to_dict(tau):
+    tau = np.asarray(tau, dtype=float)
+    out = {}
+    for i, actuator_name in enumerate(ACTUATOR_NAMES):
+        out[actuator_name] = float(tau[i])
+    return out
+
+
+def force_cmds_to_dict(foot_force_cmds):
+    return {
+        leg: np_round_list(foot_force_cmds[leg])
+        for leg in LEGS
+    }
+
+
+def build_live_probe_snapshot(
+    model,
+    data,
+    ids,
+    step,
+    q,
+    qd,
+    q_des,
+    qd_des,
+    forces,
+    desired_forces,
+    force_error,
+    foot_force_cmds,
+    tau_stand,
+    tau_grf,
+    tau_total,
+    body_shift_cmd,
+    swing_leg,
+    support_legs,
+    grf_debug,
+    swing_scale,
+    Kp,
+    Kd,
+    Kf,
+    tau_limit,
+):
+    foot_xyz_body = get_foot_xyz_body(model, data, ids)
+    foot_xy_body = {leg: foot_xyz_body[leg][:2] for leg in LEGS}
+    hip_xyz_body = get_hip_xyz_body(model, data)
+    com_world, com_from_trunk_body = get_com_info(model, data)
+    trunk_id, trunk_pos_world, _ = get_trunk_frame(model, data)
+
+    tau_total = np.asarray(tau_total, dtype=float)
+    tau_stand = np.asarray(tau_stand, dtype=float)
+    tau_grf = np.asarray(tau_grf, dtype=float)
+
+    snapshot = {
+        "step": int(step),
+        "time": float(data.time),
+        "xml_model": "scene_torque.xml",
+        "dt": float(model.opt.timestep),
+        "total_body_mass": float(np.sum(model.body_mass)),
+        "controller": {
+            "mode": "torque_pd_plus_grf",
+            "Kp": float(Kp),
+            "Kd": float(Kd),
+            "Kf": float(Kf),
+            "tau_limit": float(tau_limit),
+            "swing_leg": swing_leg,
+            "support_legs": list(support_legs),
+            "swing_scale": float(swing_scale),
+        },
+        "trunk_world": np_round_list(trunk_pos_world),
+        "trunk_qpos_xyz_quat_wxyz": np_round_list(data.qpos[:7]),
+        "com_world": np_round_list(com_world),
+        "com_from_trunk_body": np_round_list(com_from_trunk_body),
+        "hip_xyz_body": np_round_dict(hip_xyz_body),
+        "foot_xyz_body": np_round_dict(foot_xyz_body),
+        "foot_xy_body": np_round_dict(foot_xy_body),
+        "forces": {leg: float(forces[leg]) for leg in LEGS},
+        "desired_forces": {leg: float(desired_forces[leg]) for leg in LEGS},
+        "force_error": {leg: float(force_error[leg]) for leg in LEGS},
+        "foot_force_cmds_world": force_cmds_to_dict(foot_force_cmds),
+        "cop": {
+            "measured_cop": np_round_list(grf_debug.get("measured_cop", np.zeros(2))),
+            "target_cop": np_round_list(grf_debug.get("target_cop", np.zeros(2))),
+            "cop_error": np_round_list(grf_debug.get("cop_error", np.zeros(2))),
+        },
+        "body_shift_cmd": np_round_list(body_shift_cmd),
+        "joint": {
+            "q": np_round_list(q),
+            "qd": np_round_list(qd),
+            "q_des": np_round_list(q_des),
+            "qd_des": np_round_list(qd_des),
+            "q_error": np_round_list(np.asarray(q_des) - np.asarray(q)),
+            "qd_norm": float(np.linalg.norm(qd)),
+            "joint_info": get_joint_info_dict(model, data, ids),
+        },
+        "torque": {
+            "tau_stand": torque_array_to_dict(tau_stand),
+            "tau_grf": torque_array_to_dict(tau_grf),
+            "tau_total": torque_array_to_dict(tau_total),
+            "max_abs_tau_stand": float(np.max(np.abs(tau_stand))),
+            "max_abs_tau_grf": float(np.max(np.abs(tau_grf))),
+            "max_abs_tau_total": float(np.max(np.abs(tau_total))),
+            "saturated": bool(np.max(np.abs(tau_total)) >= tau_limit - 1e-6),
+        },
+    }
+
+    return snapshot
+
+
+def print_live_probe_summary(snapshot):
+    forces = snapshot["forces"]
+    torque = snapshot["torque"]
+    cop = snapshot["cop"]
+
+    print("\n========== LIVE STANDING PROBE ==========")
+    print("step:", snapshot["step"], "time:", round(snapshot["time"], 3))
+    print("trunk_world:", snapshot["trunk_world"])
+    print("com_world:", snapshot["com_world"])
+    print("com_from_trunk_body:", snapshot["com_from_trunk_body"])
+    print("forces:", {leg: round(forces[leg], 3) for leg in LEGS})
+    print("foot_xy_body:", snapshot["foot_xy_body"])
+    print("hip_xyz_body:", snapshot["hip_xyz_body"])
+    print("measured_cop:", cop["measured_cop"], "target_cop:", cop["target_cop"], "cop_error:", cop["cop_error"])
+    print("body_shift_cmd:", snapshot["body_shift_cmd"])
+    print("max_tau_stand:", round(torque["max_abs_tau_stand"], 3),
+          "max_tau_grf:", round(torque["max_abs_tau_grf"], 3),
+          "max_tau_total:", round(torque["max_abs_tau_total"], 3),
+          "saturated:", torque["saturated"])
+    print("qd_norm:", round(snapshot["joint"]["qd_norm"], 6))
+    print("========================================\n")
+
+
+def save_live_probe_snapshot(snapshot, output_path):
+    output_path = Path(output_path)
+    output_path.write_text(
+        json.dumps(snapshot, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 def read_joint_states(data, ids):
     """
@@ -298,6 +387,19 @@ def compute_desired_grf(forces, mode="shift_to_FR"):
 
         desired_forces["FR"] += delta
         desired_forces["RL"] -= delta
+
+    elif mode == "unload_RL":
+        swing_leg = "RL"
+        support_legs = ["FR", "FL", "RR"]
+
+        rl_target = 15.0
+        remaining_force = total_force - rl_target
+        support_force = remaining_force / 3.0
+
+        for leg in support_legs:
+            desired_forces[leg] = support_force
+
+        desired_forces[swing_leg] = rl_target
 
     return desired_forces 
 
@@ -373,6 +475,26 @@ def leg_jtf_torque(model, data, leg, ids, f_world):
 
     return tau_leg
 
+def compute_grf_torque(model, data, ids, foot_force_cmds):
+    """
+    leg_jtf 套用到四肢腳
+    """
+    tau_grf = np.zeros(12)
+    for leg in LEGS:
+        f_world = foot_force_cmds[leg]
+        tau_leg = leg_jtf_torque(
+            model,
+            data,
+            leg,
+            ids,
+            f_world,
+        )
+
+        leg_index = LEGS.index(leg)
+        leg_start = leg_index * 3
+        tau_grf[leg_start:leg_start + 3] = tau_leg
+
+    return tau_grf
 
 def scale_leg_torque(tau, leg, scale):
     """
@@ -387,78 +509,202 @@ def scale_leg_torque(tau, leg, scale):
 
     return tau_scaled
 
-def smooth_q_des(q_des, q_des_raw, alpha=0.05):
+def compute_body_shift_from_cop_error(cop_error, gain=0.2, max_shift=0.025):
     """
-    讓 q_des 慢慢接近 q_des_raw，避免 torque PD 突然跳太大。
+  CoP error 轉 body xy shift command
     """
-    return q_des + alpha * (q_des_raw - q_des)
+    body_shift = gain * cop_error
 
-def update_z_offset_from_force_error(
-    z_offset,
-    desired_forces,
-    measured_forces,
-    swing_leg,
-    support_legs,
-):
-    """
-    desired GRF 和 measured GRF 自動更新 z_offset。
+    body_shift = np.clip(
+        body_shift,
+        -max_shift,
+        max_shift,
+    )
 
-    """
-
-    new_z_offset = z_offset.copy()
-
-    # 每次更新最大變化量，避免突然跳太大
-    max_step = 0.00004
-
-    # z offset 限制
-    z_up_limit = 0.010      # 腳最多往上收 10 mm
-    z_down_limit = -0.006   # 支撐腳最多往下踩 6 mm
-
-    # 1. swing leg 卸重
-    swing_measured = measured_forces[swing_leg]
-    swing_desired = desired_forces.get(swing_leg, 0.0)
-
-    swing_error = swing_measured - swing_desired
-
-    if swing_error > 0.0:
-        dz = 0.000002 * swing_error
-        dz = np.clip(dz, 0.0, max_step)
-        new_z_offset[swing_leg] += dz
-
-    # 2. support legs 補支撐
-    for leg in support_legs:
-        desired = desired_forces[leg]
-        measured = measured_forces[leg]
-
-        support_error = desired - measured
-
-        if support_error > 0.0:
-            dz = -0.000002 * support_error
-            dz = np.clip(dz, -max_step, 0.0)
-            new_z_offset[leg] += dz
-
-    # 3. 限制 z_offset 範圍
-    for leg in LEGS:
-        new_z_offset[leg] = float(
-            np.clip(
-                new_z_offset[leg],
-                z_down_limit,
-                z_up_limit,
-            )
-        )
-
-    return new_z_offset
+    return body_shift
 
 def main():
     BASE_DIR = Path(__file__).resolve().parents[2]
     xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
 
+    print("XML path:", xml)
+
     model = mujoco.MjModel.from_xml_path(str(xml))
     data = mujoco.MjData(model)
 
+
+    ids = get_ids(model)
+
+    # 1. reset 到 home pose
+    key_name = "home"
+    key_id = mujoco.mj_name2id(
+        model,
+        mujoco.mjtObj.mjOBJ_KEY,
+        key_name,
+    )
+
+    if key_id < 0:
+        raise RuntimeError("找不到 home keyframe")
+
+    mujoco.mj_resetDataKeyframe(model, data, key_id)
+    mujoco.mj_forward(model, data)
+
+    # 2. 設定 home pose 為站立目標
+    q_des = np.array([data.qpos[i] for i in ids["qpos"]])
+    qd_des = np.zeros(12)
+
+    # 3. torque PD 參數
+    Kp = 100.0
+    Kd = 3.0
+
+    Kf = 0.8
+    force_limit = 25.0
+    force_sign = 1.0
+
+    tau_limit = 33.5
+    step = 0
+
+    # Probe 設定：讓 MuJoCo 照常站著，定期把當下真實狀態印出並存成 JSON。
+    probe_output_path = Path("standing_live_probe.json")
+    probe_print_every = 500
+    probe_save_every = 500
+    probe_start_step = 1000
+
+    # 4. 開啟 MuJoCo viewer
     with viewer.launch_passive(model, data) as v:
         while v.is_running():
             mujoco.mj_forward(model, data)
+
+            # 1. 讀目前關節狀態
+            q, qd = read_joint_states(data, ids)
+
+            # 2. 讀目前四腳受力 measured GRF
+            forces = read_touch_forces(data, ids)
+            foot_xy_body = get_foot_xy_body(
+                model,
+                data,
+                ids,
+            )
+
+            # 3. 計算 desired GRF
+            swing_leg = "RL"
+
+            desired_forces, force_error, cop_error, grf_debug = compute_cop_grf_redistribution(
+                swing_leg,
+                forces,
+                foot_xy_body,
+            )
+            support_legs = grf_debug["support_legs"]
+
+            foot_force_cmds = compute_foot_force_commands(
+                force_error,
+                Kf=Kf,
+                force_limit=force_limit,
+                force_sign=force_sign,
+                support_legs=support_legs,
+            )
+
+            tau_stand = compute_standing_torque(
+                data,
+                ids,
+                q,
+                qd,
+                q_des,
+                qd_des,
+                Kp,
+                Kd,
+            )
+            cop_error_norm = np.linalg.norm(cop_error)
+
+            if cop_error_norm > 0.04:
+                # CoP 還沒移到位，先不要卸 RL
+                swing_scale = 1.0
+            else:
+                # CoP 接近 target 後，才開始卸 RL
+                swing_scale = 0.7
+
+            body_shift_cmd = compute_body_shift_from_cop_error(
+                cop_error,
+                gain=0.2,
+                max_shift=0.025,
+            )
+
+            tau_stand = scale_leg_torque(
+                tau_stand,
+                swing_leg,
+                scale=swing_scale,
+            )
+
+            tau_grf = compute_grf_torque(
+                model,
+                data,
+                ids,
+                foot_force_cmds,
+            )
+
+            tau_total = tau_stand + tau_grf
+
+            # 9. 寫入 motor actuator
+            tau_total = write_torque(
+                data,
+                ids,
+                tau_total,
+                tau_limit,
+            )
+
+            # 10. debug：短訊息保留，避免你看不到控制是否正常。
+            if step % 100 == 0:
+                print(
+                    "step:", step,
+                    "z:", round(data.qpos[2], 3),
+                    "measured:", {leg: round(force, 1) for leg, force in forces.items()},
+                    "desired:", {leg: round(force, 1) for leg, force in desired_forces.items()},
+                    "error:", {leg: round(err, 1) for leg, err in force_error.items()},
+                    "Fz_cmd:", {leg: round(float(cmd[2]), 2) for leg, cmd in foot_force_cmds.items()},
+                    "max_tau_grf:", round(float(np.max(np.abs(tau_grf))), 2),
+                    "max_tau:", round(float(np.max(np.abs(tau_total))), 2),
+                    "cop:", np.round(grf_debug["measured_cop"], 3).tolist(),
+                    "target_cop:", np.round(grf_debug["target_cop"], 3).tolist(),
+                    "cop_error:", np.round(cop_error, 3).tolist(),
+                    "swing_scale:", round(swing_scale, 2),
+                    "cop_err_norm:", round(float(cop_error_norm), 3),
+                    "body_shift_cmd:", np.round(body_shift_cmd, 3).tolist(),
+                )
+
+            # 11. live probe：站穩一段時間後，輸出 Level 2 需要的正式模型/狀態資料。
+            if step >= probe_start_step and step % probe_save_every == 0:
+                snapshot = build_live_probe_snapshot(
+                    model=model,
+                    data=data,
+                    ids=ids,
+                    step=step,
+                    q=q,
+                    qd=qd,
+                    q_des=q_des,
+                    qd_des=qd_des,
+                    forces=forces,
+                    desired_forces=desired_forces,
+                    force_error=force_error,
+                    foot_force_cmds=foot_force_cmds,
+                    tau_stand=tau_stand,
+                    tau_grf=tau_grf,
+                    tau_total=tau_total,
+                    body_shift_cmd=body_shift_cmd,
+                    swing_leg=swing_leg,
+                    support_legs=support_legs,
+                    grf_debug=grf_debug,
+                    swing_scale=swing_scale,
+                    Kp=Kp,
+                    Kd=Kd,
+                    Kf=Kf,
+                    tau_limit=tau_limit,
+                )
+
+                save_live_probe_snapshot(snapshot, probe_output_path)
+
+                if step % probe_print_every == 0:
+                    print_live_probe_summary(snapshot)
+                    print("probe saved:", probe_output_path.resolve())
 
             mujoco.mj_step(model, data)
             v.sync()

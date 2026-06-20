@@ -1,7 +1,7 @@
 import numpy as np
 
 from kinematics import backward_kinematics_3d
-from robot_interface import LEGS, LEG_SIDE_SIGN
+from config import LEGS, LEG_SIDE_SIGN
 
 class IKController:
     def __init__(self, h=0.08505, hu=0.2, hl=0.2):

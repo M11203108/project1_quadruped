@@ -1,0 +1,643 @@
+{
+  "xml_path": "/home/ivan/venvs/quadruped_ros2/project1_quadruped/src/third_party/mujoco_menagerie/unitree_a1/scene_torque.xml",
+  "nq": 19,
+  "nv": 18,
+  "nu": 12,
+  "nsensor": 6,
+  "timestep": 0.002,
+  "total_body_mass": 12.453,
+  "trunk_world": [
+    -0.02205,
+    -0.00011,
+    0.093915
+  ],
+  "trunk_quat_qpos_wxyz": [
+    0.999999,
+    -0.001235,
+    -0.000564,
+    -0.000217
+  ],
+  "com_world": [
+    -0.034529,
+    0.001456,
+    0.086099
+  ],
+  "com_from_trunk_body": [
+    -0.012488,
+    0.00158,
+    -0.007798
+  ],
+  "hip_xyz_body": {
+    "FR": [
+      0.183,
+      -0.047,
+      0.0
+    ],
+    "FL": [
+      0.183,
+      0.047,
+      -0.0
+    ],
+    "RR": [
+      -0.183,
+      -0.047,
+      0.0
+    ],
+    "RL": [
+      -0.183,
+      0.047,
+      -0.0
+    ]
+  },
+  "foot_xyz_body": {
+    "FR": [
+      0.19676,
+      -0.133141,
+      -0.084105
+    ],
+    "FL": [
+      0.196439,
+      0.133784,
+      -0.083458
+    ],
+    "RR": [
+      -0.167331,
+      -0.132525,
+      -0.083871
+    ],
+    "RL": [
+      -0.167533,
+      0.133138,
+      -0.083229
+    ]
+  },
+  "foot_xy_body": {
+    "FR": [
+      0.19676,
+      -0.133141
+    ],
+    "FL": [
+      0.196439,
+      0.133784
+    ],
+    "RR": [
+      -0.167331,
+      -0.132525
+    ],
+    "RL": [
+      -0.167533,
+      0.133138
+    ]
+  },
+  "foot_world": {
+    "FR": [
+      0.174747,
+      -0.133544,
+      0.010361
+    ],
+    "FL": [
+      0.174542,
+      0.133382,
+      0.010349
+    ],
+    "RR": [
+      -0.189344,
+      -0.132769,
+      0.010183
+    ],
+    "RL": [
+      -0.189431,
+      0.132895,
+      0.010169
+    ]
+  },
+  "baseline_forces_after_settle": {
+    "FR": 25.674414,
+    "FL": 26.267303,
+    "RR": 34.731284,
+    "RL": 35.490952
+  },
+  "qpos": [
+    -0.02205,
+    -0.00011,
+    0.093915,
+    0.999999,
+    -0.001235,
+    -0.000564,
+    -0.000217,
+    -0.012892,
+    1.193202,
+    -2.706607,
+    0.020553,
+    1.196988,
+    -2.706792,
+    -0.005651,
+    1.170963,
+    -2.709255,
+    0.01299,
+    1.173385,
+    -2.709504
+  ],
+  "qvel": [
+    0.000168,
+    -3.7e-05,
+    -0.000133,
+    -0.000717,
+    -0.000107,
+    7e-05,
+    -0.000611,
+    0.002048,
+    3e-05,
+    0.002523,
+    0.001877,
+    -5.6e-05,
+    -0.000843,
+    0.001896,
+    -5.3e-05,
+    0.003296,
+    0.001685,
+    3.9e-05
+  ],
+  "ctrl_home_after_settle": [
+    0.0,
+    0.9,
+    -1.8,
+    0.0,
+    0.9,
+    -1.8,
+    0.0,
+    0.9,
+    -1.8,
+    0.0,
+    0.9,
+    -1.8
+  ],
+  "joint_info": {
+    "FR_hip_joint": {
+      "exists": true,
+      "id": 1,
+      "qposadr": 7,
+      "qveladr": 6,
+      "qpos": -0.012892251574055413,
+      "qvel": -0.0006109488052048865,
+      "range": [
+        -0.802851,
+        0.802851
+      ]
+    },
+    "FR_thigh_joint": {
+      "exists": true,
+      "id": 2,
+      "qposadr": 8,
+      "qveladr": 7,
+      "qpos": 1.1932023492125459,
+      "qvel": 0.0020480143347629907,
+      "range": [
+        -1.0472,
+        4.18879
+      ]
+    },
+    "FR_calf_joint": {
+      "exists": true,
+      "id": 3,
+      "qposadr": 9,
+      "qveladr": 8,
+      "qpos": -2.7066070291104865,
+      "qvel": 2.9601632580545e-05,
+      "range": [
+        -2.69653,
+        -0.916298
+      ]
+    },
+    "FL_hip_joint": {
+      "exists": true,
+      "id": 4,
+      "qposadr": 10,
+      "qveladr": 9,
+      "qpos": 0.02055326830292521,
+      "qvel": 0.002522819367705811,
+      "range": [
+        -0.802851,
+        0.802851
+      ]
+    },
+    "FL_thigh_joint": {
+      "exists": true,
+      "id": 5,
+      "qposadr": 11,
+      "qveladr": 10,
+      "qpos": 1.1969877761860004,
+      "qvel": 0.0018765022133257077,
+      "range": [
+        -1.0472,
+        4.18879
+      ]
+    },
+    "FL_calf_joint": {
+      "exists": true,
+      "id": 6,
+      "qposadr": 12,
+      "qveladr": 11,
+      "qpos": -2.7067918611068538,
+      "qvel": -5.6037258276723846e-05,
+      "range": [
+        -2.69653,
+        -0.916298
+      ]
+    },
+    "RR_hip_joint": {
+      "exists": true,
+      "id": 7,
+      "qposadr": 13,
+      "qveladr": 12,
+      "qpos": -0.00565061727430129,
+      "qvel": -0.0008433805468941944,
+      "range": [
+        -0.802851,
+        0.802851
+      ]
+    },
+    "RR_thigh_joint": {
+      "exists": true,
+      "id": 8,
+      "qposadr": 14,
+      "qveladr": 13,
+      "qpos": 1.1709633385878517,
+      "qvel": 0.001895982177644056,
+      "range": [
+        -1.0472,
+        4.18879
+      ]
+    },
+    "RR_calf_joint": {
+      "exists": true,
+      "id": 9,
+      "qposadr": 15,
+      "qveladr": 14,
+      "qpos": -2.709255356345197,
+      "qvel": -5.271323147780139e-05,
+      "range": [
+        -2.69653,
+        -0.916298
+      ]
+    },
+    "RL_hip_joint": {
+      "exists": true,
+      "id": 10,
+      "qposadr": 16,
+      "qveladr": 15,
+      "qpos": 0.012989833140310875,
+      "qvel": 0.003296117769805742,
+      "range": [
+        -0.802851,
+        0.802851
+      ]
+    },
+    "RL_thigh_joint": {
+      "exists": true,
+      "id": 11,
+      "qposadr": 17,
+      "qveladr": 16,
+      "qpos": 1.1733845085497137,
+      "qvel": 0.001684630806200413,
+      "range": [
+        -1.0472,
+        4.18879
+      ]
+    },
+    "RL_calf_joint": {
+      "exists": true,
+      "id": 12,
+      "qposadr": 18,
+      "qveladr": 17,
+      "qpos": -2.7095036466046745,
+      "qvel": 3.899980902450706e-05,
+      "range": [
+        -2.69653,
+        -0.916298
+      ]
+    }
+  },
+  "actuator_info": {
+    "FR_hip": {
+      "exists": true,
+      "id": 0,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "FR_thigh": {
+      "exists": true,
+      "id": 1,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "FR_calf": {
+      "exists": true,
+      "id": 2,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "FL_hip": {
+      "exists": true,
+      "id": 3,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "FL_thigh": {
+      "exists": true,
+      "id": 4,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "FL_calf": {
+      "exists": true,
+      "id": 5,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "RR_hip": {
+      "exists": true,
+      "id": 6,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "RR_thigh": {
+      "exists": true,
+      "id": 7,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "RR_calf": {
+      "exists": true,
+      "id": 8,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "RL_hip": {
+      "exists": true,
+      "id": 9,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "RL_thigh": {
+      "exists": true,
+      "id": 10,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    },
+    "RL_calf": {
+      "exists": true,
+      "id": 11,
+      "ctrlrange": [
+        -33.5,
+        33.5
+      ],
+      "forcerange": [
+        0.0,
+        0.0
+      ],
+      "gear": [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "trntype": 0,
+      "gaintype": 0,
+      "biastype": 0
+    }
+  },
+  "sensors": [
+    {
+      "id": 0,
+      "name": "imu_gyro",
+      "adr": 0,
+      "dim": 3,
+      "type": 3
+    },
+    {
+      "id": 1,
+      "name": "imu_acc",
+      "adr": 3,
+      "dim": 3,
+      "type": 1
+    },
+    {
+      "id": 2,
+      "name": "fr_touch",
+      "adr": 6,
+      "dim": 1,
+      "type": 0
+    },
+    {
+      "id": 3,
+      "name": "fl_touch",
+      "adr": 7,
+      "dim": 1,
+      "type": 0
+    },
+    {
+      "id": 4,
+      "name": "rr_touch",
+      "adr": 8,
+      "dim": 1,
+      "type": 0
+    },
+    {
+      "id": 5,
+      "name": "rl_touch",
+      "adr": 9,
+      "dim": 1,
+      "type": 0
+    }
+  ]
+}

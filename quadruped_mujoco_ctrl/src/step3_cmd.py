@@ -20,7 +20,7 @@ k_lin = 1.0
 k_yaw = 0.25
 T = 0.80  # 每 1 秒切換一次
 BASE_DIR = Path(__file__).resolve().parents[2]
-xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene.xml"
+xml = BASE_DIR / "third_party" / "mujoco_menagerie" / "unitree_a1" / "scene_torque.xml"
 # Load model
 model = mujoco.MjModel.from_xml_path(str(xml))
 data = mujoco.MjData(model)
